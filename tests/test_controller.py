@@ -11,11 +11,6 @@ from clicky.prompts import REFUSAL_SPOKEN_REPLY
 from clicky.screens import ScreenCapture, ScreenGeometry
 
 
-@pytest.fixture(scope="module")
-def qt_app():
-    return QCoreApplication.instance() or QCoreApplication([])
-
-
 @pytest.fixture
 def runner():
     async_runner = AsyncRunner()

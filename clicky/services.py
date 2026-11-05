@@ -26,9 +26,7 @@ class WorkerServices:
             self._client = httpx.AsyncClient(headers={"user-agent": "clicky-windows/0.1"})
         return self._client
 
-    async def start_transcription(
-        self, on_transcript_update: Callable[[str], None]
-    ) -> AssemblyAIStreamingSession:
+    async def start_transcription(self, on_transcript_update: Callable[[str], None]) -> AssemblyAIStreamingSession:
         token = await fetch_temporary_token(self._http_client(), self._settings.transcribe_token_url)
         session = AssemblyAIStreamingSession(
             websocket_url=build_websocket_url(token, TRANSCRIPTION_KEYTERMS),

@@ -176,9 +176,7 @@ async def stream_chat(client: httpx.AsyncClient, chat_url: str, body: dict) -> A
                     elif event_type == "message_delta":
                         stop_reason = (payload.get("delta") or {}).get("stop_reason") or stop_reason
                     elif event_type == "error":
-                        raise ClaudeStreamError(
-                            f"Claude stream error: {_error_message_from_body(sse_event.data)}"
-                        )
+                        raise ClaudeStreamError(f"Claude stream error: {_error_message_from_body(sse_event.data)}")
                     elif event_type == "message_stop":
                         yield StreamFinished(stop_reason)
                         return

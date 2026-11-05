@@ -51,9 +51,7 @@ async def fetch_temporary_token(client: httpx.AsyncClient, token_url: str) -> st
     except httpx.HTTPError as network_error:
         raise TranscriptionError(f"Couldn't reach the Clicky Worker: {network_error}") from network_error
     if response.status_code != 200:
-        raise TranscriptionError(
-            f"Worker /transcribe-token failed ({response.status_code}): {response.text[:200]}"
-        )
+        raise TranscriptionError(f"Worker /transcribe-token failed ({response.status_code}): {response.text[:200]}")
     try:
         token = response.json().get("token")
     except ValueError:
@@ -136,9 +134,7 @@ class AssemblyAIStreamingSession:
     async def open(self) -> None:
         self._session_began = asyncio.get_running_loop().create_future()
         try:
-            self._connection = await connect(
-                self._websocket_url, open_timeout=self._open_timeout, max_size=None
-            )
+            self._connection = await connect(self._websocket_url, open_timeout=self._open_timeout, max_size=None)
         except (OSError, websockets.WebSocketException, TimeoutError) as connect_error:
             raise TranscriptionError(f"Couldn't connect to AssemblyAI: {connect_error}") from connect_error
         self._receiver_task = asyncio.create_task(self._receive_messages())
@@ -169,9 +165,7 @@ class AssemblyAIStreamingSession:
             await asyncio.wait_for(self._final_turn_ended.wait(), timeout=timeout)
         if self._final_turn_ended.is_set() and not self._final_turn_formatted.is_set():
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(
-                    self._final_turn_formatted.wait(), timeout=FORMATTED_TURN_GRACE_SECONDS
-                )
+                await asyncio.wait_for(self._final_turn_formatted.wait(), timeout=FORMATTED_TURN_GRACE_SECONDS)
         transcript = self._tracker.full_transcript()
         await self._close(send_terminate=True)
         if not transcript and self._error:
@@ -219,11 +213,7 @@ class AssemblyAIStreamingSession:
         assert self._connection is not None
         try:
             async for raw_message in self._connection:
-                text = (
-                    raw_message.decode("utf-8", errors="replace")
-                    if isinstance(raw_message, bytes)
-                    else raw_message
-                )
+                text = raw_message.decode("utf-8", errors="replace") if isinstance(raw_message, bytes) else raw_message
                 try:
                     message = json.loads(text)
                 except ValueError:

@@ -7,9 +7,7 @@ from dataclasses import dataclass
 
 # Same grammar as the macOS app: [POINT:none] | [POINT:x,y] | [POINT:x,y:label] | [POINT:x,y:label:screenN]
 # The tag only counts when it is the last thing in the reply.
-POINT_TAG_PATTERN = re.compile(
-    r"\[POINT:(?:none|(\d+)\s*,\s*(\d+)(?::([^\]:\s][^\]:]*?))?(?::screen(\d+))?)\]\s*$"
-)
+POINT_TAG_PATTERN = re.compile(r"\[POINT:(?:none|(\d+)\s*,\s*(\d+)(?::([^\]:\s][^\]:]*?))?(?::screen(\d+))?)\]\s*$")
 
 
 @dataclass(frozen=True)

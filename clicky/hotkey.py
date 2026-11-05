@@ -27,9 +27,7 @@ VK_LWIN, VK_RWIN = 0x5B, 0x5C
 VK_F13 = 0x7C
 
 # Mouse buttons, plus codes some keyboards/drivers report spuriously.
-IGNORED_VIRTUAL_KEYS = frozenset(
-    {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2, 0x07, 0xE7, 0xFF}
-)
+IGNORED_VIRTUAL_KEYS = frozenset({VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2, 0x07, 0xE7, 0xFF})
 
 # name -> (keys that satisfy it, extra keys Windows also reports down at the same time)
 KEY_NAMES: dict[str, tuple[frozenset[int], frozenset[int]]] = {
@@ -75,9 +73,7 @@ def parse_hotkey(hotkey_text: str) -> ParsedHotkey:
     for raw_name in names:
         name = KEY_NAME_ALIASES.get(raw_name, raw_name)
         if name not in KEY_NAMES:
-            raise HotkeyParseError(
-                f"Unknown key {raw_name!r} in hotkey. Known keys: {', '.join(sorted(KEY_NAMES))}"
-            )
+            raise HotkeyParseError(f"Unknown key {raw_name!r} in hotkey. Known keys: {', '.join(sorted(KEY_NAMES))}")
         if name in seen_names:
             raise HotkeyParseError(f"Key {raw_name!r} appears twice in hotkey {hotkey_text!r}")
         seen_names.add(name)

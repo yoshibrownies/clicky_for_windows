@@ -34,9 +34,7 @@ def test_single_screen_label():
 def test_multi_screen_labels():
     primary = build_screen_label(index=0, count=2, is_cursor_screen=True, width=1600, height=900)
     other = build_screen_label(index=1, count=2, is_cursor_screen=False, width=1280, height=1024)
-    assert primary == (
-        "screen 1 of 2 — cursor is on this screen (primary focus) (image dimensions: 1600x900 pixels)"
-    )
+    assert primary == ("screen 1 of 2 — cursor is on this screen (primary focus) (image dimensions: 1600x900 pixels)")
     assert other == "screen 2 of 2 — secondary screen (image dimensions: 1280x1024 pixels)"
 
 

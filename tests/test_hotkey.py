@@ -145,6 +145,4 @@ def test_force_release_returns_machine_to_blocked_state():
     run(machine, [(0.0, CTRL_ALT_DOWN), (0.2, CTRL_ALT_DOWN)])
     machine.reset()
     assert run(machine, [(0.3, CTRL_ALT_DOWN), (0.6, CTRL_ALT_DOWN)]) == []
-    assert run(machine, [(0.7, set()), (0.8, CTRL_ALT_DOWN), (1.0, CTRL_ALT_DOWN)]) == [
-        (1.0, PushToTalkEvent.PRESSED)
-    ]
+    assert run(machine, [(0.7, set()), (0.8, CTRL_ALT_DOWN), (1.0, CTRL_ALT_DOWN)]) == [(1.0, PushToTalkEvent.PRESSED)]

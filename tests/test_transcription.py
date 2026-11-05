@@ -49,12 +49,8 @@ def test_tracker_combines_completed_turns_and_active_partial():
 
 def test_tracker_formatted_turn_wins_over_unformatted():
     tracker = TurnTranscriptTracker()
-    tracker.handle_turn(
-        {"turn_order": 0, "transcript": "Hello there.", "end_of_turn": True, "turn_is_formatted": True}
-    )
-    tracker.handle_turn(
-        {"turn_order": 0, "transcript": "hello there", "end_of_turn": True, "turn_is_formatted": False}
-    )
+    tracker.handle_turn({"turn_order": 0, "transcript": "Hello there.", "end_of_turn": True, "turn_is_formatted": True})
+    tracker.handle_turn({"turn_order": 0, "transcript": "hello there", "end_of_turn": True, "turn_is_formatted": False})
     assert tracker.full_transcript() == "Hello there."
 
 
@@ -110,9 +106,7 @@ class FakeAssemblyAI:
                 if isinstance(message, bytes):
                     self.received_audio_bytes += len(message)
                     await connection.send(
-                        json.dumps(
-                            {"type": "Turn", "turn_order": 0, "transcript": "where is", "end_of_turn": False}
-                        )
+                        json.dumps({"type": "Turn", "turn_order": 0, "transcript": "where is", "end_of_turn": False})
                     )
                     continue
                 message_type = json.loads(message)["type"]

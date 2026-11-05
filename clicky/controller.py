@@ -45,9 +45,7 @@ class TranscriptionSession(Protocol):
 
 
 class CompanionServices(Protocol):
-    async def start_transcription(
-        self, on_transcript_update: Callable[[str], None]
-    ) -> TranscriptionSession: ...
+    async def start_transcription(self, on_transcript_update: Callable[[str], None]) -> TranscriptionSession: ...
     def stream_reply(self, request_body: dict) -> AsyncIterator[ChatStreamEvent]: ...
     async def fetch_speech(self, text: str) -> bytes: ...
 
@@ -88,9 +86,7 @@ class _ReleaseMarker:
 NOTHING_HEARD_MESSAGE = "didn't catch that — hold the keys while you talk."
 
 
-def resolve_point_target(
-    reply_text: str, screen_captures: Sequence[ScreenCapture]
-) -> tuple[str, PointTarget | None]:
+def resolve_point_target(reply_text: str, screen_captures: Sequence[ScreenCapture]) -> tuple[str, PointTarget | None]:
     """Strip the POINT tag from a reply and map its coordinate onto the right monitor."""
     pointing = parse_point_tag(reply_text)
     if pointing.coordinate is None or not screen_captures:
@@ -288,9 +284,7 @@ class CompanionController(QObject):
                 logger.warning("Text-to-speech failed: %s", tts_error)
                 speech_error = str(tts_error)
 
-            self._reply_ready.emit(
-                CompanionReply(generation, spoken_text, point_target, speech_audio, speech_error)
-            )
+            self._reply_ready.emit(CompanionReply(generation, spoken_text, point_target, speech_audio, speech_error))
         except asyncio.CancelledError:
             raise
         except Exception as interaction_error:

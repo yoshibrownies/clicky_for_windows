@@ -153,9 +153,7 @@ async def test_stream_chat_yields_text_then_finish():
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen_requests.append(request)
-        return httpx.Response(
-            200, headers={"content-type": "text/event-stream"}, content=HAPPY_STREAM.encode()
-        )
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=HAPPY_STREAM.encode())
 
     async with make_client(handler) as client:
         events = await collect(client, {"model": "m"})

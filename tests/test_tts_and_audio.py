@@ -41,9 +41,7 @@ async def test_fetch_speech_audio_raises(response, message):
 
 
 async def test_fetch_speech_audio_rejects_blank_text():
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda request: httpx.Response(200))
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200))) as client:
         with pytest.raises(TTSError):
             await fetch_speech_audio(client, "https://w.test/tts", "   ")
 

@@ -6,7 +6,7 @@ requires-python = ">=3.13,<3.14"
 license = { text = "MIT" }
 
 [tool.ruff]
-line-length = 110
+line-length = 120
 target-version = "py313"
 extend-exclude = ["worker"]
 

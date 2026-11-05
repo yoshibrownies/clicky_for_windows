@@ -19,10 +19,16 @@ DEFAULT_MAX_TOKENS = 4096
 CHAT_TIMEOUT = httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=10.0)
 
 
-class ClaudeStreamError(RuntimeError):
+class ChatStreamError(RuntimeError):
+    """A chat reply failed (HTTP error, error event, network problem or truncated stream). Any provider."""
+
     def __init__(self, message: str, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+# Original name, kept so existing imports keep working.
+ClaudeStreamError = ChatStreamError
 
 
 @dataclass(frozen=True)

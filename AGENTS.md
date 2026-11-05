@@ -8,9 +8,11 @@ Python 3.13 + PySide6 port of farzaa/clicky. Read `docs/design.md` before changi
 - Run: `.venv\Scripts\python -m clicky` (needs `CLICKY_WORKER_URL`)
 
 ## Rules
-- `worker/src/` is the upstream Worker code and stays byte-for-byte unchanged (only the `ELEVENLABS_VOICE_ID`
-  setting in `worker/wrangler.toml` differs: a default voice free ElevenLabs plans can use). The app must work with it as-is
-  (it serves only `/chat`, `/tts`, `/transcribe-token` and forwards no client headers).
+- `worker/` is the upstream Worker plus two deliberate changes: an added `/chat-openai` route (OpenAI Chat
+  Completions, `OPENAI_API_KEY` secret) and a free-plan-friendly `ELEVENLABS_VOICE_ID` in `wrangler.toml`. Leave the
+  upstream routes (`/chat`, `/tts`, `/transcribe-token`) unchanged. The Worker forwards no client headers.
+- Models: `gpt-*` go to `/chat-openai` (`openai_client.py`), everything else to `/chat` (`claude_client.py`). Both
+  yield the same TextDelta/StreamFinished events; OpenAI finish reasons are mapped to Claude's stop-reason names.
 - No API keys in the app, repo, tests or logs.
 - Threading: Qt objects on the GUI thread only; network on `AsyncRunner`'s loop; cross-thread results go through
   Qt signals. Screen capture (`QScreen.grabWindow`) is GUI-thread only.

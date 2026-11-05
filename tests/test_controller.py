@@ -320,3 +320,17 @@ def test_visible_reply_text_hides_partial_tag():
     assert visible_reply_text("click save. [") == "click save."
     assert visible_reply_text("click save. [POINT:80") == "click save."
     assert visible_reply_text("an [array] of things") == "an [array] of things"
+
+
+def test_openai_model_gets_an_openai_shaped_request(qt_app, runner):
+    services = FakeServices()
+    controller, _, _, _ = make_controller(runner, services)
+    controller.set_model("gpt-6.1-terra")
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    body = services.request_bodies[0]
+    assert body["model"] == "gpt-6.1-terra"
+    assert body["reasoning_effort"] == "low"
+    assert body["messages"][0]["role"] == "developer"
+    assert "output_config" not in body

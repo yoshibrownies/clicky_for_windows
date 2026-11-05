@@ -7,6 +7,7 @@
  * Routes:
  *   POST /chat  → Anthropic Messages API (streaming)
  *   POST /tts   → ElevenLabs TTS API
+ *   POST /chat-openai → OpenAI Chat Completions API (streaming); added by clicky-windows
  */
 
 interface Env {
@@ -14,6 +15,8 @@ interface Env {
   ELEVENLABS_API_KEY: string;
   ELEVENLABS_VOICE_ID: string;
   ASSEMBLYAI_API_KEY: string;
+  // Optional: only needed when the app uses an OpenAI model.
+  OPENAI_API_KEY?: string;
 }
 
 export default {
@@ -35,6 +38,10 @@ export default {
 
       if (url.pathname === "/transcribe-token") {
         return await handleTranscribeToken(env);
+      }
+
+      if (url.pathname === "/chat-openai") {
+        return await handleOpenAIChat(request, env);
       }
     } catch (error) {
       console.error(`[${url.pathname}] Unhandled error:`, error);
@@ -136,6 +143,45 @@ async function handleTTS(request: Request, env: Env): Promise<Response> {
     status: response.status,
     headers: {
       "content-type": response.headers.get("content-type") || "audio/mpeg",
+    },
+  });
+}
+
+async function handleOpenAIChat(request: Request, env: Env): Promise<Response> {
+  if (!env.OPENAI_API_KEY) {
+    return new Response(
+      JSON.stringify({
+        error: { message: "OPENAI_API_KEY is not set on the Worker. Run: npx wrangler secret put OPENAI_API_KEY" },
+      }),
+      { status: 500, headers: { "content-type": "application/json" } }
+    );
+  }
+
+  const body = await request.text();
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      "content-type": "application/json",
+    },
+    body,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.error(`[/chat-openai] OpenAI API error ${response.status}: ${errorBody}`);
+    return new Response(errorBody, {
+      status: response.status,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    headers: {
+      "content-type": response.headers.get("content-type") || "text/event-stream",
+      "cache-control": "no-cache",
     },
   });
 }

@@ -19,6 +19,7 @@ from tests.test_transcription import FakeAssemblyAI
 
 class FakeWorker(BaseHTTPRequestHandler):
     chat_bodies: list[dict] = []
+    openai_chat_bodies: list[dict] = []
     tts_bodies: list[dict] = []
     token_requests = 0
 
@@ -45,6 +46,15 @@ class FakeWorker(BaseHTTPRequestHandler):
             ]
             stream = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events)
             self._send(200, "text/event-stream", stream)
+        elif self.path == "/chat-openai":
+            FakeWorker.openai_chat_bodies.append(json.loads(body))
+            chunks = [
+                {"choices": [{"index": 0, "delta": {"content": "top left. "}, "finish_reason": None}]},
+                {"choices": [{"index": 0, "delta": {"content": "[POINT:80,45:save]"}, "finish_reason": None}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+            ]
+            stream = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+            self._send(200, "text/event-stream", stream)
         elif self.path == "/tts":
             FakeWorker.tts_bodies.append(json.loads(body))
             self._send(200, "audio/mpeg", b"ID3-fake-mp3")
@@ -63,6 +73,7 @@ class FakeWorker(BaseHTTPRequestHandler):
 @pytest.fixture
 def fake_worker_url():
     FakeWorker.chat_bodies, FakeWorker.tts_bodies, FakeWorker.token_requests = [], [], 0
+    FakeWorker.openai_chat_bodies = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeWorker)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -148,4 +159,52 @@ def test_worker_down_reports_a_readable_notice(qt_app):
         assert "Couldn't reach the Clicky Worker" in notices[0]
         runner.run(services.aclose(), timeout=5)
     finally:
+        runner.stop()
+
+
+def test_openai_model_goes_through_the_chat_openai_route(qt_app, fake_worker_url):
+    runner = AsyncRunner()
+    fake_assemblyai = FakeAssemblyAI()
+
+    async def start_fake_assemblyai():
+        return await websockets.serve(fake_assemblyai.handler, "127.0.0.1", 0)
+
+    websocket_server = runner.run(start_fake_assemblyai(), timeout=5)
+    try:
+        websocket_port = websocket_server.sockets[0].getsockname()[1]
+        settings = load_settings({"CLICKY_WORKER_URL": fake_worker_url, "CLICKY_MODEL": "gpt-6.1-terra"})
+        services = WorkerServices(settings, assemblyai_websocket_base_url=f"ws://127.0.0.1:{websocket_port}/v3/ws")
+        player = FakePlayer()
+        controller = CompanionController(
+            runner=runner,
+            services=services,
+            microphone_factory=FakeMicrophone,
+            capture_screens=lambda: [PRIMARY],
+            player=player,
+            model=settings.model,
+            effort=settings.effort,
+        )
+        points = []
+        controller.point_requested.connect(points.append)
+        controller.handle_push_to_talk_pressed()
+        wait_until(lambda: fake_assemblyai.received_audio_bytes > 0)
+        controller.handle_push_to_talk_released()
+        wait_until(lambda: controller.state is CompanionState.RESPONDING, timeout=8)
+
+        assert FakeWorker.chat_bodies == []
+        openai_body = FakeWorker.openai_chat_bodies[0]
+        assert openai_body["model"] == "gpt-6.1-terra"
+        assert openai_body["messages"][-1]["content"][-1]["text"] == "Where is the save button?"
+        assert FakeWorker.tts_bodies[0]["text"] == "top left."
+        assert player.played == [b"ID3-fake-mp3"]
+        # PRIMARY: 2560x1440 logical, image 1600x900 -> (80,45) maps to (128,72)
+        assert (points[0].global_x, points[0].global_y, points[0].label) == (128, 72, "save")
+        runner.run(services.aclose(), timeout=5)
+    finally:
+
+        async def stop_fake_assemblyai():
+            websocket_server.close()
+            await websocket_server.wait_closed()
+
+        runner.run(stop_fake_assemblyai(), timeout=5)
         runner.stop()

@@ -23,7 +23,9 @@ from PySide6.QtCore import QObject, Signal, Slot
 from clicky.async_runner import AsyncRunner
 from clicky.audio_capture import compute_audio_level
 from clicky.claude_client import ChatStreamEvent, StreamFinished, TextDelta, build_chat_request_body
+from clicky.config import is_openai_model
 from clicky.conversation import ConversationHistory
+from clicky.openai_client import build_openai_chat_request_body
 from clicky.pointing import parse_point_tag
 from clicky.prompts import COMPANION_SYSTEM_PROMPT, REFUSAL_SPOKEN_REPLY
 from clicky.screens import ScreenCapture, map_image_point_to_screen
@@ -251,7 +253,10 @@ class CompanionController(QObject):
                 return
             self._partial_transcript.emit(generation, transcript)
 
-            request_body = build_chat_request_body(
+            build_request_body = (
+                build_openai_chat_request_body if is_openai_model(self.model) else build_chat_request_body
+            )
+            request_body = build_request_body(
                 model=self.model,
                 effort=self.effort,
                 system_prompt=COMPANION_SYSTEM_PROMPT,

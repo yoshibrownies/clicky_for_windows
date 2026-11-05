@@ -5,7 +5,7 @@ looks at your screens, answers out loud, and a little blue triangle flies over t
 it's talking about.
 
 A Windows port of [Clicky for macOS](https://github.com/farzaa/clicky) by Farza (MIT), rewritten in
-Python + Qt. It uses the original Cloudflare Worker unchanged, so your API keys never live on your PC or in this repo.
+Python + Qt. It uses the original Cloudflare Worker (plus an optional OpenAI route), so your API keys never live on your PC or in this repo.
 
 ```
 hold Ctrl+Alt ─▶ mic ─▶ AssemblyAI (live transcript)
@@ -30,6 +30,7 @@ npx wrangler login
 npx wrangler secret put ANTHROPIC_API_KEY
 npx wrangler secret put ASSEMBLYAI_API_KEY
 npx wrangler secret put ELEVENLABS_API_KEY
+npx wrangler secret put OPENAI_API_KEY   # optional: only to use GPT models instead of Claude
 npx wrangler deploy
 ```
 Each `secret put` asks you to paste the key. Wrangler sends it straight to Cloudflare. `deploy` prints a URL
@@ -64,14 +65,14 @@ release.
 | Press another key while holding | Cancels, so Ctrl+Alt+Del, Ctrl+Alt+T and AltGr typing are safe |
 | Release | Takes screenshots, thinks (purple spinner), then talks and points |
 | Hold Ctrl + Alt while it's talking | Interrupts it and listens again |
-| Right-click tray icon | Switch Opus 5.5 / Sonnet 5.5, hide the buddy when idle, forget the conversation, quit |
+| Right-click tray icon | Switch model (Claude Opus/Sonnet 5.5, GPT-6.1 Terra, GPT-6 Luna), hide the buddy when idle, forget the conversation, quit |
 
 Settings in `.env`:
 | Variable | Default | Notes |
 |---|---|---|
 | `CLICKY_WORKER_URL` | (required) | Your Worker URL |
 | `CLICKY_HOTKEY` | `ctrl+alt` | e.g. `right_ctrl`, `ctrl+win`, `f13`. Names: ctrl, alt, shift, win, left_/right_ variants, f13 to f24 |
-| `CLICKY_MODEL` | `claude-opus-5-5` | `claude-sonnet-5-5` is about half the price |
+| `CLICKY_MODEL` | `claude-opus-5-5` | `claude-sonnet-5-5` (half the price), or OpenAI `gpt-6.1-terra` / `gpt-6-luna` (needs the `OPENAI_API_KEY` secret). Any `gpt-*` model goes to OpenAI |
 | `CLICKY_EFFORT` | `low` | `medium`/`high` think longer before answering (slower, pricier) |
 
 **Cost:** each question sends one compressed screenshot per monitor (≤1600 px, about 2,000 tokens each), the

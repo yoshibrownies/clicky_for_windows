@@ -13,7 +13,16 @@ ALLOWED_EFFORT_LEVELS = ("low", "medium", "high")
 AVAILABLE_MODELS = {
     "claude-opus-5-5": "Claude Opus 5.5",
     "claude-sonnet-5-5": "Claude Sonnet 5.5",
+    "gpt-6.1-terra": "GPT-6.1 Terra (OpenAI)",
+    "gpt-6-luna": "GPT-6 Luna (OpenAI, cheapest)",
 }
+
+
+def is_openai_model(model: str) -> bool:
+    """OpenAI models go through the Worker's /chat-openai route; everything else through /chat (Claude)."""
+    return model.startswith("gpt-")
+
+
 PLACEHOLDER_WORKER_HOST_FRAGMENT = "your-subdomain"
 
 
@@ -39,6 +48,10 @@ class Settings:
     @property
     def transcribe_token_url(self) -> str:
         return f"{self.worker_base_url}/transcribe-token"
+
+    @property
+    def chat_openai_url(self) -> str:
+        return f"{self.worker_base_url}/chat-openai"
 
 
 def _read_value(environment: Mapping[str, str], name: str, default: str) -> str:

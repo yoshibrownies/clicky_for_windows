@@ -7,7 +7,8 @@ from collections.abc import AsyncIterator, Callable
 import httpx
 
 from clicky.claude_client import ChatStreamEvent, stream_chat
-from clicky.config import Settings
+from clicky.config import Settings, is_openai_model
+from clicky.openai_client import stream_openai_chat
 from clicky.transcription import (
     ASSEMBLYAI_WEBSOCKET_BASE_URL,
     AssemblyAIStreamingSession,
@@ -43,6 +44,8 @@ class WorkerServices:
         return session
 
     def stream_reply(self, request_body: dict) -> AsyncIterator[ChatStreamEvent]:
+        if is_openai_model(str(request_body.get("model", ""))):
+            return stream_openai_chat(self._http_client(), self._settings.chat_openai_url, request_body)
         return stream_chat(self._http_client(), self._settings.chat_url, request_body)
 
     async def fetch_speech(self, text: str) -> bytes:

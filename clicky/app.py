@@ -14,16 +14,19 @@ from dotenv import load_dotenv
 from PySide6.QtCore import QLockFile, QObject, QStandardPaths, Signal
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from clicky.annotations import AnnotationLayer
 from clicky.async_runner import AsyncRunner
 from clicky.audio_capture import MicrophoneStreamer
-from clicky.config import AVAILABLE_MODELS, ConfigError, load_settings
+from clicky.config import AVAILABLE_MODELS, EFFORT_LEVELS, ConfigError, load_settings
 from clicky.controller import CompanionController, PointTarget
 from clicky.hotkey import HotkeyParseError, HotkeyPoller, PushToTalkEvent, parse_hotkey
+from clicky.notepad import NotepadWindow
 from clicky.overlay import BuddyOverlay
 from clicky.playback import SpeechPlayer
 from clicky.screens import capture_all_screens
 from clicky.services import WorkerServices
 from clicky.tray import ClickyTray
+from clicky.visual_director import VisualDirector
 
 logger = logging.getLogger("clicky")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -149,6 +152,31 @@ def main() -> int:
         models=AVAILABLE_MODELS,
         selected_model=settings.model,
         always_visible=overlay.always_visible,
+        effort_levels=EFFORT_LEVELS,
+        selected_effort=settings.effort,
+        notepad_visible=True,
+    )
+    annotation_layer = AnnotationLayer()
+    notepad = NotepadWindow()
+
+    def point_at_event(event) -> None:
+        overlay.fly_to(event.point[0], event.point[1], event.label)
+
+    def clear_visuals() -> None:
+        annotation_layer.clear()
+        notepad.clear()
+
+    def finish_visuals() -> None:
+        annotation_layer.finish()
+        notepad.finish()
+
+    visual_director = VisualDirector(
+        annotate=annotation_layer.add_mark,
+        note=notepad.add_note,
+        diagram=notepad.set_diagram,
+        point=point_at_event,
+        clear=clear_visuals,
+        finish=finish_visuals,
     )
 
     controller.state_changed.connect(overlay.set_state)
@@ -164,7 +192,15 @@ def main() -> int:
     controller.point_requested.connect(point_at)
     player.finished.connect(controller.handle_playback_finished)
 
+    # Underlines, circles, notes and diagrams, timed to the speech.
+    controller.visuals_ready.connect(visual_director.start)
+    controller.state_changed.connect(visual_director.on_state)
+    player.progress.connect(visual_director.on_progress)
+    player.finished.connect(visual_director.on_playback_finished)
+
     tray.model_selected.connect(controller.set_model)
+    tray.effort_selected.connect(controller.set_effort)
+    tray.notepad_toggled.connect(notepad.set_enabled)
     tray.always_visible_toggled.connect(overlay.set_always_visible)
     tray.forget_requested.connect(controller.history.clear)
     tray.forget_requested.connect(lambda: overlay.show_notice("okay, fresh start."))
@@ -184,6 +220,8 @@ def main() -> int:
         except Exception:
             logger.debug("Error closing HTTP client", exc_info=True)
         runner.stop()
+        annotation_layer.close_all()
+        notepad.close()
         tray.hide()
         lock_file.unlock()
 

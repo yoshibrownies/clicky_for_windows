@@ -20,6 +20,7 @@ from tests.test_transcription import FakeAssemblyAI
 class FakeWorker(BaseHTTPRequestHandler):
     chat_bodies: list[dict] = []
     openai_chat_bodies: list[dict] = []
+    openai_reply_pieces: list[str] = []
     tts_bodies: list[dict] = []
     token_requests = 0
 
@@ -48,11 +49,11 @@ class FakeWorker(BaseHTTPRequestHandler):
             self._send(200, "text/event-stream", stream)
         elif self.path == "/chat-openai":
             FakeWorker.openai_chat_bodies.append(json.loads(body))
+            pieces = FakeWorker.openai_reply_pieces or ["top left. ", "[POINT:80,45:save]"]
             chunks = [
-                {"choices": [{"index": 0, "delta": {"content": "top left. "}, "finish_reason": None}]},
-                {"choices": [{"index": 0, "delta": {"content": "[POINT:80,45:save]"}, "finish_reason": None}]},
-                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                {"choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]} for piece in pieces
             ]
+            chunks.append({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
             stream = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
             self._send(200, "text/event-stream", stream)
         elif self.path == "/tts":
@@ -74,6 +75,7 @@ class FakeWorker(BaseHTTPRequestHandler):
 def fake_worker_url():
     FakeWorker.chat_bodies, FakeWorker.tts_bodies, FakeWorker.token_requests = [], [], 0
     FakeWorker.openai_chat_bodies = []
+    FakeWorker.openai_reply_pieces = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeWorker)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -199,6 +201,74 @@ def test_openai_model_goes_through_the_chat_openai_route(qt_app, fake_worker_url
         assert player.played == [b"ID3-fake-mp3"]
         # PRIMARY: 2560x1440 logical, image 1600x900 -> (80,45) maps to (128,72)
         assert (points[0].global_x, points[0].global_y, points[0].label) == (128, 72, "save")
+        runner.run(services.aclose(), timeout=5)
+    finally:
+
+        async def stop_fake_assemblyai():
+            websocket_server.close()
+            await websocket_server.wait_closed()
+
+        runner.run(stop_fake_assemblyai(), timeout=5)
+        runner.stop()
+
+
+def test_visual_tags_flow_from_the_model_to_the_drawing_sinks(qt_app, fake_worker_url):
+    from clicky.visual_director import VisualDirector
+
+    FakeWorker.openai_reply_pieces = [
+        "this word [UNDERLINE:160,90,480,135] is the title. ",
+        "[NOTE:title = the big text at the top] ",
+        "it works like a label on a box. [DIAGRAM:you -> title -> page]",
+    ]
+    runner = AsyncRunner()
+    fake_assemblyai = FakeAssemblyAI()
+
+    async def start_fake_assemblyai():
+        return await websockets.serve(fake_assemblyai.handler, "127.0.0.1", 0)
+
+    websocket_server = runner.run(start_fake_assemblyai(), timeout=5)
+    try:
+        websocket_port = websocket_server.sockets[0].getsockname()[1]
+        settings = load_settings({"CLICKY_WORKER_URL": fake_worker_url, "CLICKY_MODEL": "gpt-6.1-terra"})
+        services = WorkerServices(settings, assemblyai_websocket_base_url=f"ws://127.0.0.1:{websocket_port}/v3/ws")
+        player = FakePlayer()
+        controller = CompanionController(
+            runner=runner,
+            services=services,
+            microphone_factory=FakeMicrophone,
+            capture_screens=lambda: [PRIMARY],
+            player=player,
+            model=settings.model,
+            effort=settings.effort,
+        )
+        drawn = []
+        director = VisualDirector(
+            annotate=lambda event: drawn.append(("mark", event.kind, event.box)),
+            note=lambda text: drawn.append(("note", text)),
+            diagram=lambda spec: drawn.append(("diagram", spec)),
+            point=lambda event: drawn.append(("point", event.point)),
+            clear=lambda: drawn.append(("clear",)),
+            finish=lambda: drawn.append(("finish",)),
+        )
+        controller.visuals_ready.connect(director.start)
+        controller.state_changed.connect(director.on_state)
+
+        controller.handle_push_to_talk_pressed()
+        wait_until(lambda: fake_assemblyai.received_audio_bytes > 0, timeout=8)
+        controller.handle_push_to_talk_released()
+        wait_until(lambda: controller.state is CompanionState.RESPONDING, timeout=8)
+        controller.handle_playback_finished()  # speech ends -> remaining marks flush, then finish
+
+        assert FakeWorker.tts_bodies[0]["text"] == "this word is the title. it works like a label on a box."
+        # PRIMARY is 2560x1440 logical for a 1600x900 image: x * 1.6, y * 1.6
+        assert drawn == [
+            ("clear",),  # listening started: wipe the previous answer's marks
+            ("clear",),  # this reply's visuals begin
+            ("mark", "underline", (256, 144, 768, 216)),
+            ("note", "title = the big text at the top"),
+            ("diagram", "you -> title -> page"),
+            ("finish",),
+        ]
         runner.run(services.aclose(), timeout=5)
     finally:
 

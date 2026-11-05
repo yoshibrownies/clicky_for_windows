@@ -58,6 +58,16 @@ release.
 
 **Start with Windows:** press Win + R, type `shell:startup`, and put a shortcut to `Clicky.bat` in that folder.
 
+## What it does while it talks
+Clicky explains in plain words, like a patient teacher, and shows you as it goes:
+- **Animated underlines** draw under the exact words or lines it's talking about, right on your screen.
+- **Circles** go around the button or icon it means, and the blue buddy can fly over to point.
+- **A notepad** appears at the side of your screen, and Clicky hand-writes the key points on it while it speaks.
+- **Diagrams** (boxes and arrows) draw themselves on the notepad for processes and "how things connect".
+
+Everything is timed to the speech, can't be clicked (it never gets in your way), and stays out of Clicky's own
+screenshots. Marks fade a few seconds after it finishes, and the notepad after about 20 seconds.
+
 ## Using it
 | You do | Clicky does |
 |---|---|
@@ -65,7 +75,7 @@ release.
 | Press another key while holding | Cancels, so Ctrl+Alt+Del, Ctrl+Alt+T and AltGr typing are safe |
 | Release | Takes screenshots, thinks (purple spinner), then talks and points |
 | Hold Ctrl + Alt while it's talking | Interrupts it and listens again |
-| Right-click tray icon | Switch model (Claude Opus/Sonnet 5.5, GPT-6.1 Terra, GPT-6 Luna), hide the buddy when idle, forget the conversation, quit |
+| Right-click tray icon | Switch model (Claude Opus/Sonnet 5.5, GPT-6.1 Terra/Sol, GPT-6 Luna), Thinking (Fast / Balanced / Deep), Show notepad, hide the buddy when idle, forget the conversation, quit |
 
 Settings in `.env`:
 | Variable | Default | Notes |
@@ -73,7 +83,7 @@ Settings in `.env`:
 | `CLICKY_WORKER_URL` | (required) | Your Worker URL |
 | `CLICKY_HOTKEY` | `ctrl+alt` | e.g. `right_ctrl`, `ctrl+win`, `f13`. Names: ctrl, alt, shift, win, left_/right_ variants, f13 to f24 |
 | `CLICKY_MODEL` | `claude-opus-5-5` | `claude-sonnet-5-5` (half the price), or OpenAI `gpt-6.1-terra` / `gpt-6-luna` (needs the `OPENAI_API_KEY` secret). Any `gpt-*` model goes to OpenAI |
-| `CLICKY_EFFORT` | `low` | `medium`/`high` think longer before answering (slower, pricier) |
+| `CLICKY_EFFORT` | `medium` | `low` replies fastest; `high` thinks longest (slower, pricier). Also the tray's Thinking menu |
 
 **Cost:** each question sends one compressed screenshot per monitor (≤1600 px, about 2,000 tokens each), the
 system prompt and your last 10 exchanges as text. A rough estimate from list prices (not measured) is
@@ -91,6 +101,9 @@ ElevenLabs usage. Check your dashboards after the first few days.
 | `clicky/pointing.py` | Parses `[POINT:x,y:label:screenN]` |
 | `clicky/controller.py` | The state machine: idle → listening → processing → responding |
 | `clicky/overlay.py` | The buddy: click-through, always on top, **excluded from screen capture** so Claude never sees it |
+| `clicky/visuals.py`, `timeline.py`, `visual_director.py` | Parse the model's inline `[UNDERLINE]`/`[CIRCLE]`/`[NOTE]`/`[DIAGRAM]`/`[POINT]` tags and fire each at its moment in the speech |
+| `clicky/annotations.py` | Hand-drawn animated underlines and circles, one transparent layer per monitor |
+| `clicky/notepad.py`, `diagram.py` | The paper notepad: live handwriting and self-drawing box-and-arrow diagrams |
 | `clicky/tray.py`, `playback.py`, `app.py` | Tray menu, MP3 playback, wiring |
 | `worker/` | Upstream Cloudflare Worker, unchanged |
 

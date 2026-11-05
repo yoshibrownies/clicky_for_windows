@@ -19,3 +19,6 @@ Python 3.13 + PySide6 port of farzaa/clicky. Read `docs/design.md` before changi
 - Keep `tests/test_end_to_end.py` passing. It is the contract with the Worker and AssemblyAI protocol.
 - Names: descriptive over short (upstream convention). Type hints on public functions.
 - Branches `feat/…` / `fix/…`; conventional commits; never commit to `main` directly.
+- Visual explanations: the prompt (`prompts.py`) teaches inline tags; `visuals.py` limits (MAX_*) must match the
+  prompt's stated limits. Every overlay window (buddy, annotation layer, notepad) must stay click-through,
+  capture-excluded, and run its timer only while something animates. Design: `docs/superpowers/specs/2026-11-05-visual-explanations-design.md`.

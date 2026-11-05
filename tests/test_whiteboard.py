@@ -116,3 +116,21 @@ def test_disabled_or_missing_scene_does_nothing(qt_app):
         assert not board.isVisible()
     finally:
         board.close()
+
+
+def test_scene_painter_draws_into_any_rect_and_reports_a_focus_point(qt_app):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    from clicky.scene_painter import ScenePainter
+
+    image = QImage(500, 320, QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    scene_painter = ScenePainter()
+    scene_painter.paint(painter, QRectF(20, 20, 460, 280), short_scene(), 0.5)
+    painter.end()
+    painted = sum(1 for x in range(0, 500, 5) for y in range(0, 320, 5) if image.pixelColor(x, y).alpha() > 0)
+    assert painted > 100
+    assert scene_painter.focus_point is not None
+    assert 20 <= scene_painter.focus_point.x() <= 480 and 20 <= scene_painter.focus_point.y() <= 300

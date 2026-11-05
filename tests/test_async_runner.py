@@ -22,7 +22,8 @@ def test_submitted_task_survives_garbage_collection_when_caller_drops_everything
         del queue
         gc.collect()
         deadline = time.monotonic() + 2
-        while not finished and time.monotonic() < deadline:
+        # The runner forgets a task in its done-callback, a moment after the coroutine's last line runs.
+        while (not finished or runner.in_flight_count) and time.monotonic() < deadline:
             time.sleep(0.01)
         assert finished == [True]
         assert runner.in_flight_count == 0

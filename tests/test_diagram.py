@@ -78,3 +78,15 @@ def test_long_chain_in_narrow_space_switches_to_top_to_bottom():
 
 def test_empty_spec_gives_empty_layout():
     assert layout_diagram(parse_diagram(""), 300, 200).boxes == {}
+
+
+def test_cycles_keep_reading_order_and_mark_the_back_edge():
+    diagram = parse_diagram("browser -> dns -> server -> browser; server -> database")
+    layout = layout_diagram(diagram, 320, 180)
+    xs = {diagram.nodes[index]: box[0] for index, box in layout.boxes.items()}
+    assert xs["browser"] < xs["dns"] < xs["server"]
+    assert layout.back_edges == frozenset({(diagram.nodes.index("server"), diagram.nodes.index("browser"))})
+
+
+def test_acyclic_diagram_has_no_back_edges():
+    assert layout_diagram(parse_diagram("a -> b -> c"), 300, 150).back_edges == frozenset()

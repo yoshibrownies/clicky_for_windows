@@ -28,6 +28,7 @@ class Diagram:
 class DiagramLayout:
     boxes: dict[int, tuple[float, float, float, float]]
     horizontal: bool  # True: layers run left to right; False: top to bottom
+    back_edges: frozenset[tuple[int, int]] = frozenset()  # edges that loop back; drawn as curves
 
 
 def _clean_label(raw_label: str) -> str:
@@ -76,13 +77,40 @@ def parse_diagram(spec: str) -> Diagram:
     )
 
 
-def _layers(diagram: Diagram) -> list[list[int]]:
-    """Longest-path layering, bounded so cycles can't loop forever."""
+def find_back_edges(diagram: Diagram) -> frozenset[tuple[int, int]]:
+    """Edges that close a loop, found by depth-first search in the order nodes were written."""
+    outgoing: dict[int, list[int]] = {index: [] for index in range(len(diagram.nodes))}
+    for source, target in diagram.edges:
+        outgoing[source].append(target)
+    state = [0] * len(diagram.nodes)  # 0 = unvisited, 1 = on the current path, 2 = done
+    back_edges: set[tuple[int, int]] = set()
+    for root in range(len(diagram.nodes)):
+        if state[root]:
+            continue
+        stack = [(root, iter(outgoing[root]))]
+        state[root] = 1
+        while stack:
+            node, children = stack[-1]
+            child = next(children, None)
+            if child is None:
+                state[node] = 2
+                stack.pop()
+            elif state[child] == 1:
+                back_edges.add((node, child))
+            elif state[child] == 0:
+                state[child] = 1
+                stack.append((child, iter(outgoing[child])))
+    return frozenset(back_edges)
+
+
+def _layers(diagram: Diagram, back_edges: frozenset[tuple[int, int]] = frozenset()) -> list[list[int]]:
+    """Longest-path layering over the forward edges (loops don't push nodes rightwards)."""
     node_count = len(diagram.nodes)
+    forward_edges = [edge for edge in diagram.edges if edge not in back_edges]
     layer_of = [0] * node_count
     for _ in range(node_count):
         changed = False
-        for source, target in diagram.edges:
+        for source, target in forward_edges:
             candidate = layer_of[source] + 1
             if candidate > layer_of[target] and candidate < node_count:
                 layer_of[target] = candidate
@@ -100,7 +128,8 @@ def _layers(diagram: Diagram) -> list[list[int]]:
 def layout_diagram(diagram: Diagram, width: float, height: float) -> DiagramLayout:
     if not diagram.nodes:
         return DiagramLayout(boxes={}, horizontal=True)
-    layers = _layers(diagram)
+    back_edges = find_back_edges(diagram)
+    layers = _layers(diagram, back_edges)
     layer_count = len(layers)
     widest_layer = max(len(layer) for layer in layers)
 
@@ -139,4 +168,4 @@ def layout_diagram(diagram: Diagram, width: float, height: float) -> DiagramLayo
             y = start_y + layer_index * (box_height + layer_gap)
             for position, node in enumerate(layer):
                 boxes[node] = (start_x + position * (box_width + sibling_gap), y, box_width, box_height)
-    return DiagramLayout(boxes=boxes, horizontal=horizontal)
+    return DiagramLayout(boxes=boxes, horizontal=horizontal, back_edges=back_edges)

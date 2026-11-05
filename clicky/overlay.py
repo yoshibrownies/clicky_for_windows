@@ -162,6 +162,18 @@ class BuddyOverlay(QWidget):
             expires_at = None if self.companion_state != "idle" else time.monotonic() + BUBBLE_LINGER_SECONDS
             self._bubble = _Bubble(text, "reply", expires_at)
 
+    @property
+    def has_bubble(self) -> bool:
+        return self._bubble is not None
+
+    def dismiss_bubble(self) -> None:
+        """Clear-screen: drop the speech bubble and bring the buddy back to the cursor."""
+        self._wake()
+        self._bubble = None
+        self._point_label = ""
+        if self._mode in ("flying", "holding"):
+            self._start_return_flight(time.monotonic())
+
     def show_notice(self, text: str) -> None:
         if text:
             self._wake()

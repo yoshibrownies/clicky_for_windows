@@ -160,3 +160,74 @@ def test_tray_thinking_menu_and_notepad_toggle(qt_app):
     notepad_action.trigger()
     assert efforts == ["high"]
     assert notepad_states == [False]
+
+
+def test_tray_clear_screen_item_emits(qt_app):
+    from clicky.tray import ClickyTray
+
+    tray = ClickyTray(
+        hotkey_text="ctrl+alt", models=AVAILABLE_MODELS, selected_model="gpt-6.1-terra", always_visible=True
+    )
+    requests = []
+    tray.clear_requested.connect(lambda: requests.append(True))
+    clear_action = next(action for action in tray._menu.actions() if action.text().startswith("Clear screen"))
+    clear_action.trigger()
+    assert requests == [True]
+
+
+def test_overlay_dismiss_bubble_hides_it_and_brings_the_buddy_back(qt_app):
+    from clicky.overlay import BuddyOverlay
+
+    overlay = BuddyOverlay()
+    try:
+        overlay.show_notice("something")
+        overlay.fly_to(400, 300, "x")
+        assert overlay.has_bubble
+        overlay.dismiss_bubble()
+        assert not overlay.has_bubble
+        assert overlay._mode == "returning"
+    finally:
+        overlay.close()
+
+
+def test_clear_all_reaches_every_visual_and_reports_visibility(qt_app):
+    from clicky.app import build_clear_controls
+
+    calls = []
+
+    class Fake:
+        def __init__(self, name, visible=False):
+            self.name, self.visible = name, visible
+
+        def clear(self):
+            calls.append(self.name)
+
+        def cancel(self):
+            calls.append(self.name)
+
+        def dismiss_bubble(self):
+            calls.append(self.name)
+
+        def isVisible(self):  # noqa: N802 (mirrors Qt)
+            return self.visible
+
+        def visible_windows(self):
+            return [1] if self.visible else []
+
+        @property
+        def has_bubble(self):
+            return self.visible
+
+    director, layer, notepad, whiteboard, overlay = (
+        Fake("director"),
+        Fake("layer"),
+        Fake("notepad", visible=True),
+        Fake("whiteboard"),
+        Fake("overlay"),
+    )
+    clear_all, something_visible = build_clear_controls(director, layer, notepad, whiteboard, overlay)
+    assert something_visible()
+    clear_all()
+    assert calls == ["director", "layer", "notepad", "whiteboard", "overlay"]
+    notepad.visible = False
+    assert not something_visible()

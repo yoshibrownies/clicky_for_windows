@@ -25,6 +25,7 @@ VK_SHIFT, VK_CONTROL, VK_MENU = 0x10, 0x11, 0x12
 VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU = 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5
 VK_LWIN, VK_RWIN = 0x5B, 0x5C
 VK_F13 = 0x7C
+VK_ESCAPE = 0x1B
 
 # Mouse buttons, plus codes some keyboards/drivers report spuriously.
 IGNORED_VIRTUAL_KEYS = frozenset({VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2, 0x07, 0xE7, 0xFF})
@@ -209,4 +210,58 @@ class HotkeyPoller:
                     self._on_event(event)
             except Exception:
                 logger.exception("Hotkey polling failed")
+            self._stop_requested.wait(self.POLL_INTERVAL_SECONDS)
+
+
+class TapDetector:
+    """Pure edge detection: True exactly once per press (up -> down)."""
+
+    def __init__(self, initially_down: bool = False) -> None:
+        self._was_down = initially_down
+
+    def update(self, is_down: bool) -> bool:
+        tapped = is_down and not self._was_down
+        self._was_down = is_down
+        return tapped
+
+
+class KeyTapWatcher:
+    """Polls one key (Esc for "clear the screen") every 50 ms and reports each press via a callback.
+
+    Like HotkeyPoller it never swallows the key: the focused app still receives it. The callback runs on this
+    thread, so forward it through a Qt signal; the GUI side decides whether there is anything to clear.
+    """
+
+    POLL_INTERVAL_SECONDS = 0.05
+
+    def __init__(self, virtual_key: int, on_tap: Callable[[], None]) -> None:
+        import ctypes
+
+        self._get_async_key_state = ctypes.windll.user32.GetAsyncKeyState
+        self._get_async_key_state.restype = ctypes.c_short
+        self._get_async_key_state.argtypes = [ctypes.c_int]
+        self._virtual_key = virtual_key
+        self._on_tap = on_tap
+        self._stop_requested = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="clicky-key-tap", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_requested.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=1.0)
+
+    def _is_down(self) -> bool:
+        return bool(self._get_async_key_state(self._virtual_key) & 0x8000)
+
+    def _run(self) -> None:
+        detector = TapDetector(initially_down=self._is_down())
+        while not self._stop_requested.is_set():
+            try:
+                if detector.update(self._is_down()):
+                    self._on_tap()
+            except Exception:
+                logger.exception("Key tap polling failed")
             self._stop_requested.wait(self.POLL_INTERVAL_SECONDS)

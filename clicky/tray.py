@@ -47,6 +47,7 @@ class ClickyTray(QObject):
     effort_selected = Signal(str)
     notepad_toggled = Signal(bool)
     forget_requested = Signal()
+    clear_requested = Signal()
     quit_requested = Signal()
 
     def __init__(
@@ -113,6 +114,10 @@ class ClickyTray(QObject):
         always_visible_action.setChecked(always_visible)
         always_visible_action.toggled.connect(self.always_visible_toggled.emit)
         self._menu.addAction(always_visible_action)
+
+        clear_action = QAction("Clear screen (Esc)", self._menu)
+        clear_action.triggered.connect(self.clear_requested.emit)
+        self._menu.addAction(clear_action)
 
         forget_action = QAction("Forget conversation", self._menu)
         forget_action.triggered.connect(self.forget_requested.emit)

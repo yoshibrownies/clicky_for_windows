@@ -19,7 +19,7 @@ from clicky.async_runner import AsyncRunner
 from clicky.audio_capture import MicrophoneStreamer
 from clicky.config import AVAILABLE_MODELS, EFFORT_LEVELS, ConfigError, load_settings
 from clicky.controller import CompanionController, PointTarget
-from clicky.hotkey import HotkeyParseError, HotkeyPoller, PushToTalkEvent, parse_hotkey
+from clicky.hotkey import VK_ESCAPE, HotkeyParseError, HotkeyPoller, KeyTapWatcher, PushToTalkEvent, parse_hotkey
 from clicky.notepad import NotepadWindow
 from clicky.overlay import BuddyOverlay
 from clicky.playback import SpeechPlayer
@@ -96,6 +96,34 @@ def mask_worker_url(worker_url: str) -> str:
         return worker_url
     first_label = host.split(".", 1)[0]
     return f"{parsed_url.scheme}://{first_label[:4]}…(hidden)"
+
+
+def build_clear_controls(director, annotation_layer, notepad, whiteboard, overlay):
+    """(clear_all, something_visible) for the Esc key and the tray's Clear screen item.
+
+    Clearing removes every mark, note, diagram, animation and the speech bubble at once. Speech keeps playing:
+    clearing the screen shouldn't cut off an answer you're listening to (talking over Clicky does that).
+    """
+
+    def clear_all() -> None:
+        director.cancel()
+        annotation_layer.clear()
+        notepad.clear()
+        whiteboard.clear()
+        overlay.dismiss_bubble()
+
+    def something_visible() -> bool:
+        return bool(
+            annotation_layer.visible_windows() or notepad.isVisible() or whiteboard.isVisible() or overlay.has_bubble
+        )
+
+    return clear_all, something_visible
+
+
+class KeyTapBridge(QObject):
+    """Carries Esc presses from the polling thread to the GUI thread."""
+
+    tapped = Signal()
 
 
 def show_fatal_error(message: str) -> None:
@@ -217,6 +245,16 @@ def main() -> int:
     tray.notepad_toggled.connect(notepad.set_enabled)
     tray.notepad_toggled.connect(whiteboard.set_enabled)
     tray.always_visible_toggled.connect(overlay.set_always_visible)
+    clear_all, something_visible = build_clear_controls(visual_director, annotation_layer, notepad, whiteboard, overlay)
+    tray.clear_requested.connect(clear_all)
+    escape_bridge = KeyTapBridge()
+
+    def clear_on_escape() -> None:
+        if something_visible():
+            clear_all()
+
+    escape_bridge.tapped.connect(clear_on_escape)
+    escape_watcher = KeyTapWatcher(VK_ESCAPE, escape_bridge.tapped.emit)
     tray.forget_requested.connect(controller.history.clear)
     tray.forget_requested.connect(lambda: overlay.show_notice("okay, fresh start."))
 
@@ -229,6 +267,7 @@ def main() -> int:
     def shut_down() -> None:
         logger.info("Shutting down")
         hotkey_poller.stop()
+        escape_watcher.stop()
         controller.shutdown()
         try:
             runner.run(services.aclose(), timeout=3)
@@ -246,6 +285,7 @@ def main() -> int:
 
     tray.show()
     hotkey_poller.start()
+    escape_watcher.start()
     overlay.show_notice(f"hi! hold {tray.pretty_hotkey} and talk to me.")
     tray.show_message("Clicky is running", f"Hold {tray.pretty_hotkey} and talk. Logs: {log_path}")
     logger.info(

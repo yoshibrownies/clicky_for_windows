@@ -146,3 +146,20 @@ def test_force_release_returns_machine_to_blocked_state():
     machine.reset()
     assert run(machine, [(0.3, CTRL_ALT_DOWN), (0.6, CTRL_ALT_DOWN)]) == []
     assert run(machine, [(0.7, set()), (0.8, CTRL_ALT_DOWN), (1.0, CTRL_ALT_DOWN)]) == [(1.0, PushToTalkEvent.PRESSED)]
+
+
+def test_tap_detector_reports_each_press_once():
+    from clicky.hotkey import TapDetector
+
+    detector = TapDetector()
+    sequence = [False, True, True, True, False, False, True, False]
+    assert [detector.update(down) for down in sequence] == [False, True, False, False, False, False, True, False]
+
+
+def test_tap_detector_ignores_a_key_already_held_at_start():
+    from clicky.hotkey import TapDetector
+
+    detector = TapDetector(initially_down=True)
+    assert detector.update(True) is False
+    assert detector.update(False) is False
+    assert detector.update(True) is True

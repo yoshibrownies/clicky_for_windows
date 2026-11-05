@@ -1,0 +1,118 @@
+# Clicky for Windows
+
+An AI buddy that lives next to your cursor. Hold **Ctrl + Alt** and ask something. Clicky hears you,
+looks at your screens, answers out loud, and a little blue triangle flies over to point at the thing
+it's talking about.
+
+A Windows port of [Clicky for macOS](https://github.com/farzaa/clicky) by Farza (MIT), rewritten in
+Python + Qt. It uses the original Cloudflare Worker unchanged, so your API keys never live on your PC or in this repo.
+
+```
+hold Ctrl+Alt ─▶ mic ─▶ AssemblyAI (live transcript)
+release       ─▶ screenshot every monitor ─▶ Claude (streamed) ─▶ ElevenLabs voice
+                                              └─▶ [POINT:x,y:label] ─▶ buddy flies there
+```
+
+## What you need
+- Windows 10 (2004+) or 11, a microphone, speakers
+- Python **3.13** (`py -3.13 --version`)
+- Node.js 18+ (only to deploy the Worker)
+- A free [Cloudflare](https://cloudflare.com) account
+- API keys: [Anthropic](https://console.anthropic.com), [AssemblyAI](https://www.assemblyai.com), [ElevenLabs](https://elevenlabs.io)
+
+## Setup
+
+### 1. Deploy the Worker (holds your keys)
+```bash
+cd worker
+npm install
+npx wrangler login
+npx wrangler secret put ANTHROPIC_API_KEY
+npx wrangler secret put ASSEMBLYAI_API_KEY
+npx wrangler secret put ELEVENLABS_API_KEY
+npx wrangler deploy
+```
+Each `secret put` asks you to paste the key. Wrangler sends it straight to Cloudflare. `deploy` prints a URL
+like `https://clicky-proxy.<you>.workers.dev`; copy it. To use your own voice, change `ELEVENLABS_VOICE_ID` in
+`worker/wrangler.toml` before deploying.
+
+> **The Worker has no login.** Anyone who learns its URL can spend your API credit. Keep the URL private,
+> and set a monthly spend limit in the Anthropic console (and on the other two services).
+
+### 2. Install the app
+```bash
+py -3.13 -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+copy .env.example .env
+```
+Open `.env` and set `CLICKY_WORKER_URL` to your Worker URL. That's the only required setting.
+
+### 3. Run it
+Double-click **`Clicky.bat`** (no console window), or for logs in a terminal:
+```bash
+.venv\Scripts\python -m clicky
+```
+A blue triangle appears in the system tray (it may be in the ^ overflow). Hold **Ctrl + Alt**, talk,
+release.
+
+**Start with Windows:** press Win + R, type `shell:startup`, and put a shortcut to `Clicky.bat` in that folder.
+
+## Using it
+| You do | Clicky does |
+|---|---|
+| Hold Ctrl + Alt | Starts listening (green waveform). It waits 0.15 s so quick shortcuts don't trigger it |
+| Press another key while holding | Cancels, so Ctrl+Alt+Del, Ctrl+Alt+T and AltGr typing are safe |
+| Release | Takes screenshots, thinks (purple spinner), then talks and points |
+| Hold Ctrl + Alt while it's talking | Interrupts it and listens again |
+| Right-click tray icon | Switch Opus 5.5 / Sonnet 5.5, hide the buddy when idle, forget the conversation, quit |
+
+Settings in `.env`:
+| Variable | Default | Notes |
+|---|---|---|
+| `CLICKY_WORKER_URL` | (required) | Your Worker URL |
+| `CLICKY_HOTKEY` | `ctrl+alt` | e.g. `right_ctrl`, `ctrl+win`, `f13`. Names: ctrl, alt, shift, win, left_/right_ variants, f13 to f24 |
+| `CLICKY_MODEL` | `claude-opus-5-5` | `claude-sonnet-5-5` is about half the price |
+| `CLICKY_EFFORT` | `low` | `medium`/`high` think longer before answering (slower, pricier) |
+
+**Cost:** each question sends one compressed screenshot per monitor (≤1600 px, about 2,000 tokens each), the
+system prompt and your last 10 exchanges as text. A rough estimate from list prices (not measured) is
+2 to 3 US cents per question on Opus 5.5 at low effort, about half that on Sonnet 5.5, plus AssemblyAI and
+ElevenLabs usage. Check your dashboards after the first few days.
+
+## How it works
+| File | Job |
+|---|---|
+| `clicky/hotkey.py` | Polls `GetAsyncKeyState` (no hooks, no admin) through a hold/cancel state machine |
+| `clicky/audio_capture.py` | 16 kHz mono PCM16 mic stream (sounddevice) |
+| `clicky/transcription.py` | AssemblyAI v3 websocket: temporary token from the Worker, turn tracking, ForceEndpoint on release |
+| `clicky/screens.py` | Grabs each monitor (cursor screen first), labels them, maps Claude's pixel coordinates back to the desktop at any DPI scale |
+| `clicky/claude_client.py` | Streams `/chat` server-sent events (raw httpx, because the Worker serves `/chat`, not `/v1/messages`) |
+| `clicky/pointing.py` | Parses `[POINT:x,y:label:screenN]` |
+| `clicky/controller.py` | The state machine: idle → listening → processing → responding |
+| `clicky/overlay.py` | The buddy: click-through, always on top, **excluded from screen capture** so Claude never sees it |
+| `clicky/tray.py`, `playback.py`, `app.py` | Tray menu, MP3 playback, wiring |
+| `worker/` | Upstream Cloudflare Worker, unchanged |
+
+Network calls run on a background asyncio loop; the Qt GUI thread only draws. See `docs/design.md` for the
+design decisions and the approaches considered.
+
+## Development
+```bash
+.venv\Scripts\python -m pip install -r requirements-dev.txt
+.venv\Scripts\python -m pytest -q
+.venv\Scripts\ruff check . && .venv\Scripts\ruff format --check .
+```
+The tests cover everything except the real APIs, including a full interaction through the real httpx and
+websockets code against a fake Worker and a fake AssemblyAI (`tests/test_end_to_end.py`).
+
+## Troubleshooting
+- **Logs:** `%LOCALAPPDATA%\Clicky\clicky.log`
+- **"Couldn't reach the Clicky Worker":** check `CLICKY_WORKER_URL`, and that `npx wrangler deploy` succeeded.
+- **401 / invalid key errors:** re-run the matching `npx wrangler secret put …` and redeploy.
+- **Mic doesn't work:** Windows Settings → Privacy & security → Microphone → allow desktop apps.
+- **The hotkey clashes with something:** set `CLICKY_HOTKEY` (e.g. `right_ctrl`) and restart Clicky.
+- **The buddy points slightly off:** Claude estimates the coordinates itself; Opus 5.5 is usually more accurate than Sonnet.
+
+## Credits
+Original Clicky and the Worker: [farzaa/clicky](https://github.com/farzaa/clicky) (MIT). The official, polished
+apps are at [heyclicky.com](https://www.heyclicky.com/). This is an independent community port.

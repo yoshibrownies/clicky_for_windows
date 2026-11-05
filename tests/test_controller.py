@@ -270,6 +270,19 @@ def test_stale_results_are_ignored(qt_app, runner):
     assert player.played == []
 
 
+def test_stale_nothing_heard_does_not_reset_a_newer_interaction(qt_app, runner):
+    services = FakeServices(transcript="")
+    controller, _, _, recorded = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    controller.handle_push_to_talk_pressed()  # new interaction starts before the old one reports back
+    stale_generation = controller._generation - 2  # the first interaction (abort bumps once, press once)
+    controller._nothing_heard.emit(stale_generation)
+    QCoreApplication.processEvents()
+    assert controller.state is CompanionState.LISTENING
+    assert recorded["notices"] == []
+
+
 def test_microphone_failure_reports_notice(qt_app, runner):
     services = FakeServices()
 

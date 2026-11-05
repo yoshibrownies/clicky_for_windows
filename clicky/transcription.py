@@ -31,7 +31,9 @@ class TranscriptionError(RuntimeError):
     pass
 
 
-def build_websocket_url(temporary_token: str, keyterms: Sequence[str] = ()) -> str:
+def build_websocket_url(
+    temporary_token: str, keyterms: Sequence[str] = (), base_url: str = ASSEMBLYAI_WEBSOCKET_BASE_URL
+) -> str:
     query_parameters = {
         "sample_rate": str(SAMPLE_RATE_HERTZ),
         "encoding": "pcm_s16le",
@@ -42,7 +44,7 @@ def build_websocket_url(temporary_token: str, keyterms: Sequence[str] = ()) -> s
     if normalized_keyterms:
         query_parameters["keyterms_prompt"] = json.dumps(normalized_keyterms)
     query_parameters["token"] = temporary_token
-    return f"{ASSEMBLYAI_WEBSOCKET_BASE_URL}?{urlencode(query_parameters)}"
+    return f"{base_url}?{urlencode(query_parameters)}"
 
 
 async def fetch_temporary_token(client: httpx.AsyncClient, token_url: str) -> str:

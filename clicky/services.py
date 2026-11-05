@@ -8,7 +8,12 @@ import httpx
 
 from clicky.claude_client import ChatStreamEvent, stream_chat
 from clicky.config import Settings
-from clicky.transcription import AssemblyAIStreamingSession, build_websocket_url, fetch_temporary_token
+from clicky.transcription import (
+    ASSEMBLYAI_WEBSOCKET_BASE_URL,
+    AssemblyAIStreamingSession,
+    build_websocket_url,
+    fetch_temporary_token,
+)
 from clicky.tts import fetch_speech_audio
 
 # Words AssemblyAI should expect, improving recognition of names it would otherwise mishear.
@@ -16,8 +21,10 @@ TRANSCRIPTION_KEYTERMS = ("Clicky", "Claude", "VS Code", "GitHub", "Python", "Wi
 
 
 class WorkerServices:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, assemblyai_websocket_base_url: str = ASSEMBLYAI_WEBSOCKET_BASE_URL) -> None:
         self._settings = settings
+        # Overridable so the end-to-end test can point at a local fake AssemblyAI.
+        self._assemblyai_websocket_base_url = assemblyai_websocket_base_url
         self._client: httpx.AsyncClient | None = None
 
     def _http_client(self) -> httpx.AsyncClient:
@@ -29,7 +36,7 @@ class WorkerServices:
     async def start_transcription(self, on_transcript_update: Callable[[str], None]) -> AssemblyAIStreamingSession:
         token = await fetch_temporary_token(self._http_client(), self._settings.transcribe_token_url)
         session = AssemblyAIStreamingSession(
-            websocket_url=build_websocket_url(token, TRANSCRIPTION_KEYTERMS),
+            websocket_url=build_websocket_url(token, TRANSCRIPTION_KEYTERMS, self._assemblyai_websocket_base_url),
             on_transcript_update=on_transcript_update,
         )
         await session.open()

@@ -170,3 +170,44 @@ def test_unusable_complete_scene_block_is_removed_without_eating_the_rest():
     reply = parse_visual_reply(f"balls fall. <scene>{SCENE_JSON}</scene> then it lands. [NOTE:gravity] the end.")
     assert reply.spoken_text == "balls fall. then it lands. the end."
     assert [event.kind for event in reply.events] == ["note"]
+
+
+def test_card_tags_title_heading_formula_and_followups():
+    reply = parse_visual_reply(
+        "[TITLE:drag forces] [HEADING:What slows you down?] drag pushes against motion. "
+        "[FORMULA:F = ½ρCAv²] it grows with speed squared. [FOLLOWUP:Explain terminal speed] "
+        "[FOLLOWUP:Try a calculation]"
+    )
+    assert reply.spoken_text == "drag pushes against motion. it grows with speed squared."
+    kinds = [(event.kind, event.text) for event in reply.events]
+    assert kinds == [
+        ("title", "drag forces"),
+        ("heading", "What slows you down?"),
+        ("formula", "F = ½ρCAv²"),
+        ("followup", "Explain terminal speed"),
+        ("followup", "Try a calculation"),
+    ]
+    assert all(event.fraction == 1.0 for event in reply.events if event.kind == "followup")
+
+
+def test_followups_fire_at_the_end_even_when_written_early():
+    reply = parse_visual_reply("[FOLLOWUP:Go deeper] then a long explanation follows here.")
+    assert reply.events[0].fraction == 1.0
+
+
+def test_card_tag_limits_and_lengths():
+    reply = parse_visual_reply(
+        "x [TITLE:a] [TITLE:b] [HEADING:h1] [HEADING:h2] "
+        + " ".join(f"[FORMULA:f{index}]" for index in range(5))
+        + " "
+        + " ".join(f"[FOLLOWUP:q{index}]" for index in range(5))
+        + " [TITLE:"
+        + "t" * 100
+        + "]"
+    )
+    counts = {
+        kind: sum(event.kind == kind for event in reply.events) for kind in ("title", "heading", "formula", "followup")
+    }
+    assert counts == {"title": 1, "heading": 1, "formula": 3, "followup": 3}
+    long_reply = parse_visual_reply("[HEADING:" + "h" * 200 + "] [FOLLOWUP:" + "q" * 200 + "]")
+    assert len(long_reply.events[0].text) <= 60 and len(long_reply.events[1].text) <= 40

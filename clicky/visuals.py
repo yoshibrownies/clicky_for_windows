@@ -16,12 +16,14 @@ MAX_NOTES = 8
 MAX_DIAGRAMS = 1
 MAX_POINTS = 4
 MAX_ANIMATIONS = 1
+# Lesson-card text blocks: (limit per reply, maximum characters)
+CARD_TEXT_TAGS = {"TITLE": (1, 40), "HEADING": (1, 60), "FORMULA": (3, 60), "FOLLOWUP": (3, 40)}
 MAX_NOTE_LENGTH = 80
 
 # Any [UPPERCASE:...] tag. Known kinds become events; unknown ones are still stripped from speech.
 TAG_PATTERN = re.compile(r"\[([A-Z]{2,12}):([^\[\]]*)\]")
 TAG_START_PATTERN = re.compile(r"\[([A-Z]{2,12}):")
-KNOWN_TAG_NAMES = frozenset({"POINT", "UNDERLINE", "CIRCLE", "NOTE", "DIAGRAM", "ANIMATE"})
+KNOWN_TAG_NAMES = frozenset({"POINT", "UNDERLINE", "CIRCLE", "NOTE", "DIAGRAM", "ANIMATE", *CARD_TEXT_TAGS})
 # Animation scenes are JSON (which needs square brackets), so they live in blocks rather than inline tags:
 # <scene name="roll">{...}</scene>, referenced from the speech by [ANIMATE:roll].
 SCENE_BLOCK_PATTERN = re.compile(r"<scene\b([^>]*)>(.*?)</scene\s*>", re.DOTALL | re.IGNORECASE)
@@ -199,6 +201,15 @@ def _parse_tag(name: str, body: str, fraction: float) -> VisualEvent | None:
         if len(text) > MAX_NOTE_LENGTH:
             text = text[: MAX_NOTE_LENGTH - 1].rstrip() + "…"
         return VisualEvent(kind="note", fraction=fraction, text=text)
+    if name in CARD_TEXT_TAGS:
+        maximum_length = CARD_TEXT_TAGS[name][1]
+        text = " ".join(body.split())
+        if not text:
+            return None
+        if len(text) > maximum_length:
+            text = text[: maximum_length - 1].rstrip() + "…"
+        # Follow-up questions are offered after the answer, wherever the model wrote them.
+        return VisualEvent(kind=name.lower(), fraction=1.0 if name == "FOLLOWUP" else fraction, text=text)
     if name == "DIAGRAM":
         text = " ".join(body.split())
         if "->" not in text:
@@ -237,8 +248,16 @@ def parse_visual_reply(response_text: str) -> VisualReply:
         "diagram": MAX_DIAGRAMS,
         "point": MAX_POINTS,
         "animate": MAX_ANIMATIONS,
+        **{name.lower(): limit for name, (limit, _) in CARD_TEXT_TAGS.items()},
     }
-    counts = {"marks": 0, "note": 0, "diagram": 0, "point": 0, "animate": 0}
+    counts = {
+        "marks": 0,
+        "note": 0,
+        "diagram": 0,
+        "point": 0,
+        "animate": 0,
+        **{name.lower(): 0 for name in CARD_TEXT_TAGS},
+    }
     events: list[VisualEvent] = []
     for name, body, offset in pending:
         fraction = 0.0 if total_length == 0 else min(1.0, max(0.0, offset / total_length))

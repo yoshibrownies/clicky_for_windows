@@ -158,7 +158,7 @@ def build_visual_plan(
         return map_image_point_to_screen(image_point, (capture.image_width, capture.image_height), capture.geometry)
 
     for event in visual_reply.events:
-        if event.kind in ("note", "diagram", "animate"):
+        if event.kind in ("note", "diagram", "animate", "title", "heading", "formula", "followup"):
             screen_events.append(ScreenVisualEvent(kind=event.kind, fraction=event.fraction, text=event.text))
             continue
         capture = capture_for(event.screen_number)

@@ -470,3 +470,15 @@ def test_animate_events_pass_through_with_their_scene_text():
     scene = '{"objects": [{"type": "point", "x": 1, "y": 1}]}'
     _, _, events = build_visual_plan(f'see [ANIMATE:s] this <scene name="s">{scene}</scene>', [PRIMARY])
     assert [(event.kind, event.text) for event in events] == [("animate", scene)]
+
+
+def test_card_events_pass_through():
+    from clicky.controller import build_visual_plan
+
+    _, _, events = build_visual_plan("[TITLE:t] [HEADING:h] x [FORMULA:f] [FOLLOWUP:q]", [PRIMARY])
+    assert [(event.kind, event.text) for event in events] == [
+        ("title", "t"),
+        ("heading", "h"),
+        ("formula", "f"),
+        ("followup", "q"),
+    ]

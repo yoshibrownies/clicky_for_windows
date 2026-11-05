@@ -103,3 +103,17 @@ def test_player_progress_math(qt_app):
     assert progress_fraction(500, 2000) == 0.25
     assert progress_fraction(5000, 2000) == 1.0
     assert progress_fraction(100, 0) is None
+
+
+def test_animate_events_go_to_the_animate_sink(qt_app):
+    sinks = Sinks()
+    director = sinks.make_director(animate=lambda scene_text: sinks.calls.append(("animate", scene_text)))
+    director.start(
+        VisualPlan(
+            spoken_text="watch this",
+            events=(ScreenVisualEvent(kind="animate", fraction=0.2, text='{"objects": []}'),),
+            has_audio=True,
+        )
+    )
+    director.on_progress(0.3)
+    assert ("animate", '{"objects": []}') in sinks.calls

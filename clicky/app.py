@@ -23,10 +23,12 @@ from clicky.hotkey import HotkeyParseError, HotkeyPoller, PushToTalkEvent, parse
 from clicky.notepad import NotepadWindow
 from clicky.overlay import BuddyOverlay
 from clicky.playback import SpeechPlayer
+from clicky.scene import parse_scene
 from clicky.screens import capture_all_screens
 from clicky.services import WorkerServices
 from clicky.tray import ClickyTray
 from clicky.visual_director import VisualDirector
+from clicky.whiteboard import WhiteboardWindow
 
 logger = logging.getLogger("clicky")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -158,6 +160,14 @@ def main() -> int:
     )
     annotation_layer = AnnotationLayer()
     notepad = NotepadWindow()
+    whiteboard = WhiteboardWindow()
+
+    def play_animation(scene_text: str) -> None:
+        scene = parse_scene(scene_text)
+        if scene is None:
+            logger.info("Ignored an animation scene that didn't parse")
+            return
+        whiteboard.play(scene)
 
     def point_at_event(event) -> None:
         overlay.fly_to(event.point[0], event.point[1], event.label)
@@ -165,10 +175,12 @@ def main() -> int:
     def clear_visuals() -> None:
         annotation_layer.clear()
         notepad.clear()
+        whiteboard.clear()
 
     def finish_visuals() -> None:
         annotation_layer.finish()
         notepad.finish()
+        whiteboard.finish()
 
     visual_director = VisualDirector(
         annotate=annotation_layer.add_mark,
@@ -177,6 +189,7 @@ def main() -> int:
         point=point_at_event,
         clear=clear_visuals,
         finish=finish_visuals,
+        animate=play_animation,
     )
 
     controller.state_changed.connect(overlay.set_state)
@@ -202,6 +215,7 @@ def main() -> int:
     tray.model_selected.connect(controller.set_model)
     tray.effort_selected.connect(controller.set_effort)
     tray.notepad_toggled.connect(notepad.set_enabled)
+    tray.notepad_toggled.connect(whiteboard.set_enabled)
     tray.always_visible_toggled.connect(overlay.set_always_visible)
     tray.forget_requested.connect(controller.history.clear)
     tray.forget_requested.connect(lambda: overlay.show_notice("okay, fresh start."))
@@ -223,6 +237,7 @@ def main() -> int:
         runner.stop()
         annotation_layer.close_all()
         notepad.close()
+        whiteboard.close()
         tray.hide()
         lock_file.unlock()
 

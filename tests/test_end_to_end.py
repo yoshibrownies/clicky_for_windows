@@ -278,3 +278,69 @@ def test_visual_tags_flow_from_the_model_to_the_drawing_sinks(qt_app, fake_worke
 
         runner.run(stop_fake_assemblyai(), timeout=5)
         runner.stop()
+
+
+def test_an_animation_scene_flows_from_the_model_to_the_whiteboard_sink(qt_app, fake_worker_url):
+    from clicky.scene import parse_scene
+    from clicky.visual_director import VisualDirector
+
+    scene_json = (
+        '{"title": "falling", "duration": 4, "world": {"x": [0, 10], "y": [0, 50]}, '
+        '"objects": [{"type": "circle", "x": 2, "y": "50 - 4.9*t^2"}, '
+        '{"type": "rect", "x": 5, "y": 0, "w": 1, "h": [[0, 1], [2, 30]]}]}'
+    )
+    FakeWorker.openai_reply_pieces = [
+        "a dropped ball speeds up as it falls. [ANIMATE:fall] ",
+        f'every second it goes faster. <scene name="fall">{scene_json}</scene>',
+    ]
+    runner = AsyncRunner()
+    fake_assemblyai = FakeAssemblyAI()
+
+    async def start_fake_assemblyai():
+        return await websockets.serve(fake_assemblyai.handler, "127.0.0.1", 0)
+
+    websocket_server = runner.run(start_fake_assemblyai(), timeout=5)
+    try:
+        websocket_port = websocket_server.sockets[0].getsockname()[1]
+        settings = load_settings({"CLICKY_WORKER_URL": fake_worker_url, "CLICKY_MODEL": "gpt-6.1-terra"})
+        services = WorkerServices(settings, assemblyai_websocket_base_url=f"ws://127.0.0.1:{websocket_port}/v3/ws")
+        controller = CompanionController(
+            runner=runner,
+            services=services,
+            microphone_factory=FakeMicrophone,
+            capture_screens=lambda: [PRIMARY],
+            player=FakePlayer(),
+            model=settings.model,
+            effort=settings.effort,
+        )
+        played = []
+        director = VisualDirector(
+            annotate=lambda event: None,
+            note=lambda text: None,
+            diagram=lambda spec: None,
+            point=lambda event: None,
+            clear=lambda: None,
+            finish=lambda: None,
+            animate=played.append,
+        )
+        controller.visuals_ready.connect(director.start)
+        controller.state_changed.connect(director.on_state)
+        controller.handle_push_to_talk_pressed()
+        wait_until(lambda: fake_assemblyai.received_audio_bytes > 0, timeout=8)
+        controller.handle_push_to_talk_released()
+        wait_until(lambda: controller.state is CompanionState.RESPONDING, timeout=8)
+        controller.handle_playback_finished()
+
+        assert FakeWorker.tts_bodies[0]["text"] == "a dropped ball speeds up as it falls. every second it goes faster."
+        assert len(played) == 1
+        scene = parse_scene(played[0])
+        assert scene is not None and scene.title == "falling" and len(scene.objects) == 2
+        runner.run(services.aclose(), timeout=5)
+    finally:
+
+        async def stop_fake_assemblyai():
+            websocket_server.close()
+            await websocket_server.wait_closed()
+
+        runner.run(stop_fake_assemblyai(), timeout=5)
+        runner.stop()

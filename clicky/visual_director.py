@@ -29,11 +29,13 @@ class VisualDirector(QObject):
         point: Callable[[object], None],
         clear: Callable[[], None],
         finish: Callable[[], None],
+        animate: Callable[[str], None] | None = None,
         estimate_duration: Callable[[str], float] = estimated_duration_seconds,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._sinks = {"underline": annotate, "circle": annotate, "point": point}
+        self._animate = animate or (lambda scene_text: None)
         self._note = note
         self._diagram = diagram
         self._clear = clear
@@ -110,6 +112,8 @@ class VisualDirector(QObject):
                 self._note(event.text)
             elif event.kind == "diagram":
                 self._diagram(event.text)
+            elif event.kind == "animate":
+                self._animate(event.text)
             elif event.kind in self._sinks:
                 self._sinks[event.kind](event)
         except Exception:

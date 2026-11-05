@@ -25,3 +25,23 @@ def test_examples_write_notes_while_talking_not_only_at_the_end():
     assert noted, "examples should include notes"
     for reply in noted:
         assert min(event.fraction for event in reply.events if event.kind == "note") < 0.8
+
+
+def test_every_example_animation_in_the_prompt_parses_and_fires():
+    import re
+
+    from clicky.scene import parse_scene
+    from clicky.visuals import parse_visual_reply
+
+    assert "[ANIMATE:" in COMPANION_SYSTEM_PROMPT and "<scene name=" in COMPANION_SYSTEM_PROMPT
+    examples = re.findall(r'^- user asks[^"]*"(.*)"\s*$', COMPANION_SYSTEM_PROMPT, flags=re.MULTILINE)
+    animated = [example for example in examples if "<scene" in example]
+    assert len(animated) >= 2
+    for example in animated:
+        reply = parse_visual_reply(example)
+        scenes = [event for event in reply.events if event.kind == "animate"]
+        assert len(scenes) == 1, example[:60]
+        scene = parse_scene(scenes[0].text)
+        assert scene is not None, example[:60]
+        assert scene.frame(scene.duration / 2), "the example should draw something mid-way"
+        assert "<scene" not in reply.spoken_text and "{" not in reply.spoken_text

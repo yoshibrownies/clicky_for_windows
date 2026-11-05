@@ -1,0 +1,76 @@
+"""Runtime settings, read from environment variables (and a local dotenv file at startup)."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from urllib.parse import urlparse
+
+DEFAULT_HOTKEY = "ctrl+alt"
+DEFAULT_MODEL = "claude-opus-5-5"
+DEFAULT_EFFORT = "low"
+ALLOWED_EFFORT_LEVELS = ("low", "medium", "high")
+AVAILABLE_MODELS = {
+    "claude-opus-5-5": "Claude Opus 5.5",
+    "claude-sonnet-5-5": "Claude Sonnet 5.5",
+}
+PLACEHOLDER_WORKER_HOST_FRAGMENT = "your-subdomain"
+
+
+class ConfigError(ValueError):
+    """Raised when settings are missing or invalid. The message is shown to the user."""
+
+
+@dataclass(frozen=True)
+class Settings:
+    worker_base_url: str
+    hotkey: str
+    model: str
+    effort: str
+
+    @property
+    def chat_url(self) -> str:
+        return f"{self.worker_base_url}/chat"
+
+    @property
+    def tts_url(self) -> str:
+        return f"{self.worker_base_url}/tts"
+
+    @property
+    def transcribe_token_url(self) -> str:
+        return f"{self.worker_base_url}/transcribe-token"
+
+
+def _read_value(environment: Mapping[str, str], name: str, default: str) -> str:
+    value = (environment.get(name) or "").strip()
+    return value or default
+
+
+def load_settings(environment: Mapping[str, str]) -> Settings:
+    """Build Settings from an environment mapping such as os.environ."""
+    worker_url = (environment.get("CLICKY_WORKER_URL") or "").strip().rstrip("/")
+    if not worker_url:
+        raise ConfigError(
+            "CLICKY_WORKER_URL is not set. Copy .env.example to .env and put your Worker URL in it."
+        )
+    parsed_worker_url = urlparse(worker_url)
+    if parsed_worker_url.scheme not in ("http", "https") or not parsed_worker_url.netloc:
+        raise ConfigError(
+            f"CLICKY_WORKER_URL must start with https:// (or http:// for local dev): {worker_url!r}"
+        )
+    if PLACEHOLDER_WORKER_HOST_FRAGMENT in parsed_worker_url.netloc:
+        raise ConfigError(
+            "CLICKY_WORKER_URL is still the placeholder from .env.example. "
+            "Deploy the Worker (README step 1) and paste the URL it prints."
+        )
+
+    effort = _read_value(environment, "CLICKY_EFFORT", DEFAULT_EFFORT).lower()
+    if effort not in ALLOWED_EFFORT_LEVELS:
+        raise ConfigError(f"CLICKY_EFFORT must be one of {', '.join(ALLOWED_EFFORT_LEVELS)}, got {effort!r}")
+
+    return Settings(
+        worker_base_url=worker_url,
+        hotkey=_read_value(environment, "CLICKY_HOTKEY", DEFAULT_HOTKEY).lower(),
+        model=_read_value(environment, "CLICKY_MODEL", DEFAULT_MODEL),
+        effort=effort,
+    )

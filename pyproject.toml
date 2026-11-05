@@ -1,0 +1,23 @@
+[project]
+name = "clicky-windows"
+version = "0.1.0"
+description = "An AI buddy that lives next to your cursor on Windows: push-to-talk, sees your screens, talks back, points at things."
+requires-python = ">=3.13,<3.14"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+extend-exclude = ["worker"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# The system prompt is prose; wrapping it would change what Claude reads.
+"clicky/prompts.py" = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

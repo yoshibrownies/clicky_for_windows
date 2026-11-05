@@ -1,0 +1,6 @@
+PySide6-Essentials>=6.8
+PySide6-Addons>=6.8
+httpx>=0.27
+websockets>=13
+sounddevice>=0.5
+python-dotenv>=1.0

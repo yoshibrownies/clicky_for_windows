@@ -41,6 +41,7 @@ LINE_HEIGHT = 28
 TEXT_LEFT = 58  # just right of the red margin line
 TEXT_RIGHT_PADDING = 20
 DIAGRAM_HEIGHT = 200
+MIN_DIAGRAM_HEIGHT = 130
 BOTTOM_PADDING = 18
 NODE_APPEAR_SECONDS = 0.22
 EDGE_DRAW_SECONDS = 0.3
@@ -130,6 +131,7 @@ class NotepadWindow(QWidget):
         linger_seconds: float = DEFAULT_LINGER_SECONDS,
         fade_seconds: float = DEFAULT_FADE_SECONDS,
         characters_per_second: float = DEFAULT_CHARACTERS_PER_SECOND,
+        max_height: int | None = None,
     ) -> None:
         super().__init__(None)
         self.setWindowFlags(
@@ -144,6 +146,7 @@ class NotepadWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setWindowTitle("Clicky's notes")
+        self._max_height_override = max_height
         self._linger_seconds = linger_seconds
         self._fade_seconds = fade_seconds
         self._characters_per_second = characters_per_second
@@ -254,14 +257,40 @@ class NotepadWindow(QWidget):
     def _note_line_count(self) -> int:
         return sum(len(note.wrapped_lines) for note in self._notes)
 
-    def _content_height(self) -> int:
-        lines = max(2, self._note_line_count())
-        height = HEADER_HEIGHT + lines * LINE_HEIGHT + BOTTOM_PADDING
+    def _height_cap(self) -> int:
+        """At most 85% of the monitor the notepad docks on (or a fixed cap, in tests)."""
+        if self._max_height_override is not None:
+            return self._max_height_override
+        screen = QGuiApplication.screenAt(self.geometry().center()) or QGuiApplication.primaryScreen()
+        return int(screen.availableGeometry().height() * 0.85) if screen else 900
+
+    def _layout(self) -> tuple[int, int, int, int]:
+        """(first visible note line, visible line count, diagram height, window height).
+
+        When everything doesn't fit, the diagram shrinks to a minimum first, then the oldest note lines scroll off
+        the top, so nothing is ever painted past the paper's edge.
+        """
+        cap = self._height_cap()
+        inner_cap = cap - 2 * SHADOW - HEADER_HEIGHT - BOTTOM_PADDING
+        total_lines = self._note_line_count()
+        wanted_lines = max(2, total_lines)
+        diagram_height = 0
         if self._diagram:
-            height += DIAGRAM_HEIGHT
-        screen = QGuiApplication.primaryScreen()
-        maximum = int(screen.availableGeometry().height() * 0.85) if screen else 900
-        return min(height + 2 * SHADOW, maximum)
+            diagram_height = DIAGRAM_HEIGHT
+            if wanted_lines * LINE_HEIGHT + diagram_height > inner_cap:
+                diagram_height = min(DIAGRAM_HEIGHT, max(MIN_DIAGRAM_HEIGHT, inner_cap - wanted_lines * LINE_HEIGHT))
+        visible_lines = max(1, int((inner_cap - diagram_height) // LINE_HEIGHT))
+        shown_lines = min(wanted_lines, visible_lines)
+        first_visible_line = max(0, total_lines - visible_lines)
+        height = 2 * SHADOW + HEADER_HEIGHT + shown_lines * LINE_HEIGHT + diagram_height + BOTTOM_PADDING
+        return first_visible_line, shown_lines, diagram_height, min(cap, height)
+
+    def layout_metrics(self) -> tuple[int, int]:
+        first_visible_line, _, diagram_height, _ = self._layout()
+        return first_visible_line, diagram_height
+
+    def _content_height(self) -> int:
+        return self._layout()[3]
 
     def _opacity(self, now: float) -> float:
         if self._fade_at is None or now < self._fade_at:
@@ -340,11 +369,17 @@ class NotepadWindow(QWidget):
     def _paint_notes(self, painter: QPainter, paper: QRectF, now: float) -> None:
         painter.setFont(self._note_font)
         painter.setPen(INK_COLOR)
+        first_visible_line = self._layout()[0]
         line_index = 0
         for note in self._notes:
             remaining = typed_characters(now - note.starts_at, self._characters_per_second, len(note.text))
             for wrapped_index, wrapped_line in enumerate(note.wrapped_lines):
-                baseline = paper.top() + HEADER_HEIGHT + (line_index + 1) * LINE_HEIGHT - 6
+                row = line_index - first_visible_line
+                baseline = paper.top() + HEADER_HEIGHT + (row + 1) * LINE_HEIGHT - 6
+                if row < 0:  # scrolled off the top to make room
+                    remaining -= len(wrapped_line) + 1
+                    line_index += 1
+                    continue
                 if wrapped_index == 0 and remaining > 0:
                     painter.drawText(QPointF(paper.left() + TEXT_LEFT - 2, baseline), "•")
                 visible = wrapped_line[: max(0, remaining)]
@@ -356,8 +391,9 @@ class NotepadWindow(QWidget):
     def _paint_diagram(self, painter: QPainter, paper: QRectF, now: float) -> None:
         drawn = self._diagram
         assert drawn is not None
-        top = paper.top() + HEADER_HEIGHT + max(2, self._note_line_count()) * LINE_HEIGHT + 10
-        area = QRectF(paper.left() + 16, top, paper.width() - 32, min(DIAGRAM_HEIGHT - 20, paper.bottom() - top - 10))
+        _, shown_lines, diagram_height, _ = self._layout()
+        top = paper.top() + HEADER_HEIGHT + shown_lines * LINE_HEIGHT + 10
+        area = QRectF(paper.left() + 16, top, paper.width() - 32, min(diagram_height - 20, paper.bottom() - top - 10))
         if area.height() < 40:
             return
         layout = layout_diagram(drawn.diagram, area.width(), area.height())

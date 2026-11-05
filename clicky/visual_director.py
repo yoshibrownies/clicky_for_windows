@@ -69,6 +69,11 @@ class VisualDirector(QObject):
         for event in self._timeline.due(progress):
             self._dispatch(event)
 
+    def cancel(self) -> None:
+        """The reply was interrupted: forget its pending events without drawing them."""
+        self._stop_timer()
+        self._timeline = None
+
     def on_playback_finished(self) -> None:
         self._complete()
 

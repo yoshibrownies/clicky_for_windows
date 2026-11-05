@@ -19,6 +19,69 @@ MAX_NOTE_LENGTH = 80
 
 # Any [UPPERCASE:...] tag. Known kinds become events; unknown ones are still stripped from speech.
 TAG_PATTERN = re.compile(r"\[([A-Z]{2,12}):([^\[\]]*)\]")
+TAG_START_PATTERN = re.compile(r"\[([A-Z]{2,12}):")
+KNOWN_TAG_NAMES = frozenset({"POINT", "UNDERLINE", "CIRCLE", "NOTE", "DIAGRAM"})
+# The start of a tag still being streamed at the very end: "[", "[NO", "[NOTE".
+PARTIAL_TAG_START_AT_END_PATTERN = re.compile(r"\[[A-Z]*$")
+
+
+@dataclass(frozen=True)
+class _FoundTag:
+    start: int
+    end: int
+    name: str
+    body: str
+    closed: bool
+
+
+def find_tags(text: str) -> list[_FoundTag]:
+    """Locate tags. Known kinds may contain brackets (a note like "list[0] is first"), matched by depth.
+
+    A known tag with no closing bracket runs to the end of the text, so it is never spoken.
+    """
+    found: list[_FoundTag] = []
+    search_from = 0
+    while True:
+        match = TAG_START_PATTERN.search(text, search_from)
+        if match is None:
+            return found
+        name, body_start = match.group(1), match.end()
+        if name in KNOWN_TAG_NAMES:
+            depth = 0
+            close_index = -1
+            for index in range(body_start, len(text)):
+                character = text[index]
+                if character == "[":
+                    depth += 1
+                elif character == "]":
+                    if depth == 0:
+                        close_index = index
+                        break
+                    depth -= 1
+            if close_index == -1:
+                found.append(_FoundTag(match.start(), len(text), name, text[body_start:], closed=False))
+                return found
+        else:
+            close_index = text.find("]", body_start)
+            next_open = text.find("[", body_start)
+            if close_index == -1 or (next_open != -1 and next_open < close_index):
+                search_from = match.end()
+                continue
+        found.append(_FoundTag(match.start(), close_index + 1, name, text[body_start:close_index], closed=True))
+        search_from = close_index + 1
+
+
+def visible_text(partial_text: str) -> str:
+    """Text for the speech bubble while a reply streams in: no tags, not even a half-written last one."""
+    pieces: list[str] = []
+    cursor = 0
+    for tag in find_tags(partial_text):
+        pieces.append(partial_text[cursor : tag.start])
+        cursor = tag.end
+    pieces.append(partial_text[cursor:])
+    return clean_spoken_text(PARTIAL_TAG_START_AT_END_PATTERN.sub("", " ".join(pieces)))
+
+
 SCREEN_SUFFIX_PATTERN = re.compile(r"^screen(\d+)$")
 
 
@@ -131,12 +194,13 @@ def parse_visual_reply(response_text: str) -> VisualReply:
     spoken_length = 0
     pending: list[tuple[str, str, int]] = []
     cursor = 0
-    for match in TAG_PATTERN.finditer(response_text):
-        segment = response_text[cursor : match.start()]
+    for tag in find_tags(response_text):
+        segment = response_text[cursor : tag.start]
         spoken_parts.append(segment)
         spoken_length += len(segment)
-        pending.append((match.group(1), match.group(2), spoken_length))
-        cursor = match.end()
+        if tag.closed:
+            pending.append((tag.name, tag.body, spoken_length))
+        cursor = tag.end
     spoken_parts.append(response_text[cursor:])
     raw_spoken = "".join(spoken_parts)
     total_length = len(raw_spoken.rstrip())

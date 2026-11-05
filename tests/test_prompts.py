@@ -10,3 +10,18 @@ def test_prompt_asks_for_simple_explanations():
     lowered = COMPANION_SYSTEM_PROMPT.lower()
     assert "plain" in lowered and "analogy" in lowered
     assert "notepad" in lowered
+
+
+def test_examples_write_notes_while_talking_not_only_at_the_end():
+    import re
+
+    from clicky.visuals import parse_visual_reply
+
+    lowered = COMPANION_SYSTEM_PROMPT.lower()
+    assert "right after the sentence" in lowered
+    assert "never put square brackets inside a tag" in lowered
+    examples = re.findall(r'^- user asks[^"]*"(.*)"\s*$', COMPANION_SYSTEM_PROMPT, flags=re.MULTILINE)
+    noted = [parse_visual_reply(example) for example in examples if "[NOTE:" in example]
+    assert noted, "examples should include notes"
+    for reply in noted:
+        assert min(event.fraction for event in reply.events if event.kind == "note") < 0.8

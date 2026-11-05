@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
-import re
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -30,7 +29,7 @@ from clicky.openai_client import build_openai_chat_request_body
 from clicky.pointing import parse_point_tag
 from clicky.prompts import COMPANION_SYSTEM_PROMPT, REFUSAL_SPOKEN_REPLY
 from clicky.screens import ScreenCapture, map_image_point_to_screen
-from clicky.visuals import TAG_PATTERN, clean_spoken_text, parse_visual_reply
+from clicky.visuals import parse_visual_reply, visible_text
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +124,17 @@ def resolve_point_target(reply_text: str, screen_captures: Sequence[ScreenCaptur
     return pointing.spoken_text, PointTarget(global_x, global_y, pointing.label or "")
 
 
+def _inside_image(event, capture: ScreenCapture) -> bool:
+    width, height = capture.image_width, capture.image_height
+    if event.point is not None:
+        x, y = event.point
+        return x <= width * 1.02 and y <= height * 1.02
+    if event.box is not None:
+        left, top, right, bottom = event.box
+        return left < width and top < height and right <= width * 1.05 and bottom <= height * 1.05
+    return True
+
+
 # A POINT this close to the end is the classic "point while answering" tag: fly there straight away.
 LEGACY_POINT_FRACTION = 0.9
 
@@ -154,6 +164,8 @@ def build_visual_plan(
         capture = capture_for(event.screen_number)
         if capture is None:
             continue  # nothing to map onto (screen capture failed)
+        if not _inside_image(event, capture):
+            continue  # the model pointed outside the screenshot; drawing it would land in a screen corner
         if event.kind == "point" and event.point is not None:
             global_x, global_y = to_screen(capture, event.point)
             if event.fraction >= LEGACY_POINT_FRACTION and legacy_point is None:
@@ -173,15 +185,9 @@ def build_visual_plan(
     return visual_reply.spoken_text, legacy_point, tuple(screen_events)
 
 
-# A tag still being streamed: '[', '[NO', '[NOTE:half written' at the very end.
-PARTIAL_TAG_AT_END_PATTERN = re.compile(r"\[[A-Z]*(?::[^\[\]]*)?$")
-
-
 def visible_reply_text(partial_reply: str) -> str:
     """What the speech bubble shows while streaming: the text without tags, including a half-written last one."""
-    without_complete_tags = TAG_PATTERN.sub(" ", partial_reply)
-    without_partial_tag = PARTIAL_TAG_AT_END_PATTERN.sub("", without_complete_tags)
-    return clean_spoken_text(without_partial_tag)
+    return visible_text(partial_reply)
 
 
 class CompanionController(QObject):
@@ -191,6 +197,7 @@ class CompanionController(QObject):
     reply_text_changed = Signal(str)
     point_requested = Signal(object)  # PointTarget
     visuals_ready = Signal(object)  # VisualPlan: timed underlines, circles, notes, diagrams, points
+    interrupted = Signal()  # the current reply was cut short: drop its pending visuals without showing them
     notice = Signal(str)  # short message shown in the bubble (errors, "didn't catch that")
 
     # Internal: emitted from the asyncio thread, delivered on the GUI thread.
@@ -445,6 +452,8 @@ class CompanionController(QObject):
                 logger.exception("Microphone failed to stop")
 
     def _abort_current_interaction(self) -> None:
+        # Before player.stop(): stopping reports "finished", which would otherwise flush every pending mark.
+        self.interrupted.emit()
         self._stop_microphone()
         self._audio_queue = None
         future, self._interaction_future = self._interaction_future, None

@@ -398,3 +398,67 @@ def test_streaming_bubble_hides_every_kind_of_tag():
     assert visible_reply_text("see [CIRCLE:10,20") == "see"
     assert visible_reply_text("steps: [DIAGRAM:a -> b") == "steps:"
     assert visible_reply_text("an [array] of things") == "an [array] of things"
+
+
+# ---------- review fixes ----------
+
+
+class StopEmittingPlayer(FakePlayer):
+    """Like the real SpeechPlayer: stop() reports playback finished straight away."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.on_finished = None
+
+    def stop(self) -> None:
+        super().stop()
+        if self.on_finished is not None:
+            self.on_finished()
+
+
+def test_interrupting_mid_speech_never_flashes_the_old_replys_remaining_visuals(qt_app, runner):
+    from clicky.visual_director import VisualDirector
+
+    services = FakeServices(reply_chunks=("first point. ", "second point [NOTE:later note] ", "end [NOTE:last note]"))
+    player = StopEmittingPlayer()
+    controller = CompanionController(
+        runner=runner,
+        services=services,
+        microphone_factory=FakeMicrophone,
+        capture_screens=lambda: [PRIMARY],
+        player=player,
+        model="m",
+        effort="low",
+    )
+    player.on_finished = controller.handle_playback_finished
+    drawn = []
+    director = VisualDirector(
+        annotate=lambda event: drawn.append("mark"),
+        note=lambda text: drawn.append(f"note:{text}"),
+        diagram=lambda spec: drawn.append("diagram"),
+        point=lambda event: drawn.append("point"),
+        clear=lambda: drawn.append("clear"),
+        finish=lambda: drawn.append("finish"),
+    )
+    controller.visuals_ready.connect(director.start)
+    controller.state_changed.connect(director.on_state)
+    controller.interrupted.connect(director.cancel)
+
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    director.on_progress(0.1)  # early in the speech: the notes are not due yet
+    drawn.clear()
+    controller.handle_push_to_talk_pressed()  # interrupt
+    assert not any(item.startswith("note:") for item in drawn), drawn
+    assert "finish" not in drawn
+
+
+def test_offscreen_marks_are_dropped_not_squashed_into_a_corner():
+    from clicky.controller import build_visual_plan
+
+    _, legacy_point, events = build_visual_plan(
+        "a [CIRCLE:5000,5000,6000,6000] b [UNDERLINE:10,10,200,30] c [POINT:9000,20:x] d", [PRIMARY]
+    )
+    assert [event.kind for event in events] == ["underline"]
+    assert legacy_point is None

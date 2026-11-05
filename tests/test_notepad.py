@@ -93,3 +93,18 @@ def test_bad_diagram_spec_is_ignored(qt_app):
         assert notepad.diagram_node_count() == 0
     finally:
         notepad.close()
+
+
+def test_small_screen_keeps_the_diagram_and_scrolls_old_note_lines(qt_app):
+    notepad = NotepadWindow(characters_per_second=10_000, max_height=520)
+    try:
+        notepad.set_enabled(True)
+        for index in range(8):
+            notepad.add_note(f"note number {index} with enough words to wrap onto two lines")
+        notepad.set_diagram("a -> b -> c")
+        assert notepad.height() <= 520
+        first_visible_line, diagram_height = notepad.layout_metrics()
+        assert diagram_height >= 120
+        assert first_visible_line > 0  # oldest lines scrolled away rather than painted off the paper
+    finally:
+        notepad.close()

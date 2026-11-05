@@ -86,3 +86,25 @@ def test_limits_are_applied():
 def test_long_notes_are_truncated():
     reply = parse_visual_reply("[NOTE:" + "x" * 200 + "]")
     assert len(reply.events[0].text) <= 80
+
+
+def test_square_brackets_inside_notes_and_diagrams_are_kept_in_the_tag():
+    reply = parse_visual_reply(
+        "the first item [NOTE:list[0] is the first item] is at index zero [DIAGRAM:a[0] -> a[1]]"
+    )
+    assert reply.spoken_text == "the first item is at index zero"
+    assert [event.text for event in reply.events] == ["list[0] is the first item", "a[0] -> a[1]"]
+
+
+def test_an_unclosed_known_tag_is_never_spoken():
+    reply = parse_visual_reply("see the loop [NOTE:arr[i] holds each value")
+    assert reply.spoken_text == "see the loop"
+    assert reply.events == ()
+
+
+def test_visible_text_hides_bracketed_and_half_streamed_tags():
+    from clicky.visuals import visible_text
+
+    assert visible_text("see [NOTE:arr[i") == "see"
+    assert visible_text("see [NOTE:arr[i] is fine] then") == "see then"
+    assert visible_text("an [array] of things") == "an [array] of things"

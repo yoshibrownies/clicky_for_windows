@@ -344,7 +344,7 @@ async def test_release_before_any_partial_arrives_still_gets_the_words():
         port = server.sockets[0].getsockname()[1]
         session = AssemblyAIStreamingSession(websocket_url=f"ws://127.0.0.1:{port}/v3/ws")
         await session.open()
-        await session.send_audio(b"\x00\x00" * 800)
+        await session.send_audio(loud_pcm16())
         assert await session.finish(timeout=2.5) == "What is this?"
 
 
@@ -389,7 +389,51 @@ async def test_audio_after_a_finished_turn_is_also_waited_for():
         port = server.sockets[0].getsockname()[1]
         session = AssemblyAIStreamingSession(websocket_url=f"ws://127.0.0.1:{port}/v3/ws")
         await session.open()
-        await session.send_audio(b"\x00\x00" * 800)
+        await session.send_audio(loud_pcm16())
         await asyncio.sleep(0.2)  # first turn completes
-        await session.send_audio(b"\x00\x00" * 800)  # more speech, no partial back yet
+        await session.send_audio(loud_pcm16())  # more speech, no partial back yet
         assert await session.finish(timeout=2.5) == "First part. Second part."
+
+
+def loud_pcm16(frames: int = 800) -> bytes:
+    import math
+    import struct
+
+    return struct.pack(f"<{frames}h", *(int(8000 * math.sin(index / 5)) for index in range(frames)))
+
+
+async def test_silence_after_a_finished_turn_does_not_add_a_wait():
+    async def handler(connection) -> None:
+        await connection.send(json.dumps({"type": "Begin"}))
+        sent_turn = False
+        async for message in connection:
+            if isinstance(message, bytes):
+                if not sent_turn:
+                    sent_turn = True
+                    await connection.send(
+                        json.dumps(
+                            {
+                                "type": "Turn",
+                                "turn_order": 0,
+                                "transcript": "Hello there.",
+                                "end_of_turn": True,
+                                "turn_is_formatted": True,
+                            }
+                        )
+                    )
+                continue  # silence afterwards: AssemblyAI sends nothing
+            if json.loads(message)["type"] == "Terminate":
+                await connection.send(json.dumps({"type": "Termination"}))
+                return
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        session = AssemblyAIStreamingSession(websocket_url=f"ws://127.0.0.1:{port}/v3/ws")
+        await session.open()
+        await session.send_audio(loud_pcm16())
+        await asyncio.sleep(0.2)
+        for _ in range(5):  # user keeps holding the key in silence
+            await session.send_audio(b"\x00\x00" * 800)
+        started = asyncio.get_running_loop().time()
+        assert await session.finish(timeout=2.5) == "Hello there."
+        assert asyncio.get_running_loop().time() - started < 1.0

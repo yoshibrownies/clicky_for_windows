@@ -194,6 +194,7 @@ def main() -> int:
 
     # Underlines, circles, notes and diagrams, timed to the speech.
     controller.visuals_ready.connect(visual_director.start)
+    controller.interrupted.connect(visual_director.cancel)
     controller.state_changed.connect(visual_director.on_state)
     player.progress.connect(visual_director.on_progress)
     player.finished.connect(visual_director.on_playback_finished)

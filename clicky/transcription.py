@@ -18,6 +18,8 @@ import httpx
 import websockets
 from websockets.asyncio.client import ClientConnection, connect
 
+from clicky.audio_capture import compute_audio_level
+
 logger = logging.getLogger(__name__)
 
 ASSEMBLYAI_WEBSOCKET_BASE_URL = "wss://streaming.assemblyai.com/v3/ws"
@@ -25,6 +27,8 @@ SAMPLE_RATE_HERTZ = 16000
 FINAL_TRANSCRIPT_TIMEOUT_SECONDS = 2.5
 # After an unformatted end-of-turn arrives, how long to wait for its formatted version.
 FORMATTED_TURN_GRACE_SECONDS = 0.6
+# compute_audio_level() value above which a chunk counts as speech (about -44 dBFS; room noise sits lower).
+SPEECH_LEVEL_THRESHOLD = 0.2
 
 
 class TranscriptionError(RuntimeError):
@@ -177,7 +181,9 @@ class AssemblyAIStreamingSession:
             return
         try:
             await self._connection.send(pcm16_audio)
-            self._audio_sent_since_completed_turn = True
+            # The mic streams silence too while the key is held; only audible audio can still become words.
+            if compute_audio_level(pcm16_audio) >= SPEECH_LEVEL_THRESHOLD:
+                self._audio_sent_since_completed_turn = True
         except websockets.ConnectionClosed as closed_error:
             self._record_unexpected_close(closed_error)
             self._closed = True

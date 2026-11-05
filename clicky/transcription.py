@@ -146,6 +146,9 @@ class AssemblyAIStreamingSession:
         self._closing_by_us = False
         self._closed = False
         self._error: str | None = None
+        # True when audio went out after the last completed turn. AssemblyAI's partials lag the audio, so "no turn
+        # in progress yet" does not mean "nothing left to transcribe".
+        self._audio_sent_since_completed_turn = False
 
     @property
     def latest_transcript(self) -> str:
@@ -174,6 +177,7 @@ class AssemblyAIStreamingSession:
             return
         try:
             await self._connection.send(pcm16_audio)
+            self._audio_sent_since_completed_turn = True
         except websockets.ConnectionClosed as closed_error:
             self._record_unexpected_close(closed_error)
             self._closed = True
@@ -183,9 +187,12 @@ class AssemblyAIStreamingSession:
         if self._connection is not None and not self._closed:
             active_turn_order = self._tracker.active_turn_order
             latest_completed_turn = self._tracker.latest_completed_turn
-            if active_turn_order is not None:
-                # Mid-sentence: force that turn to end and wait for it.
-                self._final_turn_minimum_order = active_turn_order
+            if active_turn_order is not None or self._audio_sent_since_completed_turn:
+                # Mid-sentence, or speech not transcribed yet: force the turn to end and wait for it.
+                if active_turn_order is not None:
+                    self._final_turn_minimum_order = active_turn_order
+                else:
+                    self._final_turn_minimum_order = latest_completed_turn[0] + 1 if latest_completed_turn else 0
                 await self._send_control_message("ForceEndpoint")
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._final_turn_ended.wait(), timeout=timeout)
@@ -263,6 +270,8 @@ class AssemblyAIStreamingSession:
 
     def _handle_turn_message(self, message: dict) -> None:
         completed_turn = self._tracker.handle_turn(message)
+        if completed_turn:
+            self._audio_sent_since_completed_turn = False
         full_transcript = self._tracker.full_transcript()
         if full_transcript and self._on_transcript_update is not None:
             self._on_transcript_update(full_transcript)

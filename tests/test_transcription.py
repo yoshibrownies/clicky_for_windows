@@ -314,3 +314,82 @@ async def test_finish_returns_quickly_when_no_turn_is_in_progress():
         started = asyncio.get_running_loop().time()
         assert await session.finish(timeout=2.5) == "Hello there."
         assert asyncio.get_running_loop().time() - started < 1.0
+
+
+async def test_release_before_any_partial_arrives_still_gets_the_words():
+    # AssemblyAI's partials lag the audio. Releasing before the first one arrives must still force the turn to end.
+    async def lagging_handler(connection) -> None:
+        await connection.send(json.dumps({"type": "Begin"}))
+        async for message in connection:
+            if isinstance(message, bytes):
+                continue  # no partials yet
+            message_type = json.loads(message)["type"]
+            if message_type == "ForceEndpoint":
+                await connection.send(
+                    json.dumps(
+                        {
+                            "type": "Turn",
+                            "turn_order": 0,
+                            "transcript": "What is this?",
+                            "end_of_turn": True,
+                            "turn_is_formatted": True,
+                        }
+                    )
+                )
+            elif message_type == "Terminate":
+                await connection.send(json.dumps({"type": "Termination"}))
+                return
+
+    async with websockets.serve(lagging_handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        session = AssemblyAIStreamingSession(websocket_url=f"ws://127.0.0.1:{port}/v3/ws")
+        await session.open()
+        await session.send_audio(b"\x00\x00" * 800)
+        assert await session.finish(timeout=2.5) == "What is this?"
+
+
+async def test_audio_after_a_finished_turn_is_also_waited_for():
+    async def handler(connection) -> None:
+        await connection.send(json.dumps({"type": "Begin"}))
+        audio_frames = 0
+        async for message in connection:
+            if isinstance(message, bytes):
+                audio_frames += 1
+                if audio_frames == 1:
+                    await connection.send(
+                        json.dumps(
+                            {
+                                "type": "Turn",
+                                "turn_order": 0,
+                                "transcript": "First part.",
+                                "end_of_turn": True,
+                                "turn_is_formatted": True,
+                            }
+                        )
+                    )
+                continue
+            message_type = json.loads(message)["type"]
+            if message_type == "ForceEndpoint":
+                await connection.send(
+                    json.dumps(
+                        {
+                            "type": "Turn",
+                            "turn_order": 1,
+                            "transcript": "Second part.",
+                            "end_of_turn": True,
+                            "turn_is_formatted": True,
+                        }
+                    )
+                )
+            elif message_type == "Terminate":
+                await connection.send(json.dumps({"type": "Termination"}))
+                return
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        session = AssemblyAIStreamingSession(websocket_url=f"ws://127.0.0.1:{port}/v3/ws")
+        await session.open()
+        await session.send_audio(b"\x00\x00" * 800)
+        await asyncio.sleep(0.2)  # first turn completes
+        await session.send_audio(b"\x00\x00" * 800)  # more speech, no partial back yet
+        assert await session.finish(timeout=2.5) == "First part. Second part."

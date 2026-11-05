@@ -186,3 +186,45 @@ def test_code_fences_around_json_are_tolerated():
 
 def test_oversized_scene_text_is_rejected():
     assert parse_scene("{" + " " * 30000 + "}") is None
+
+
+def test_huge_json_integers_never_raise():
+    huge = "1" + "0" * 400
+    for text in (
+        '{"objects": [{"type": "point", "x": HUGE, "y": 1}, {"type": "point", "x": 1, "y": 1}]}'.replace("HUGE", huge),
+        '{"duration": HUGE, "objects": [{"type": "point", "x": 1, "y": 1}]}'.replace("HUGE", huge),
+        '{"world": {"x": [0, HUGE], "y": [0, 1]}, "objects": [{"type": "point", "x": 1, "y": 1}]}'.replace(
+            "HUGE", huge
+        ),
+    ):
+        scene = parse_scene(text)
+        assert scene is not None and len(scene.objects) >= 1
+
+
+def test_worst_case_scene_stays_inside_the_frame_budget():
+    import time
+
+    long_formula = (
+        "sin(x*0.5+t)*3 + cos(x*0.25-t)*2 + sqrt(abs(x)+1)*0.5 + min(x, t)*0.1 + max(x, 2)*0.05 + lerp(1, 2, 0.5)"
+    )
+    trail_formula = "5 + sin(t*3)*2 + cos(t*1.5)*1.5 + sqrt(t+1) + abs(sin(t)) + min(t, 3) + lerp(0, 1, 0.5)"
+    objects = [{"type": "plot", "fn": long_formula, "from": 0, "to": 10} for _ in range(20)]
+    objects += [{"type": "circle", "x": trail_formula, "y": trail_formula, "trail": True} for _ in range(20)]
+    scene = scene_from({"duration": 30, "world": {"x": [0, 10], "y": [0, 20]}, "objects": objects})
+    timings = []
+    for frame_index in range(7):
+        started = time.perf_counter()
+        scene.frame(10.0 + frame_index * 0.016)
+        timings.append(time.perf_counter() - started)
+    assert sorted(timings)[3] < 0.008, f"median frame took {sorted(timings)[3] * 1000:.1f} ms"
+
+
+def test_plot_and_trail_caps():
+    from clicky.scene import MAX_PLOTS, MAX_TRAILS
+
+    objects = [{"type": "plot", "fn": "x", "from": 0, "to": 1} for _ in range(10)]
+    objects += [{"type": "circle", "x": 1, "y": 1, "trail": True} for _ in range(10)]
+    scene = scene_from({"objects": objects})
+    assert sum(item.kind == "plot" for item in scene.objects) == MAX_PLOTS
+    assert sum(item.trail for item in scene.objects) == MAX_TRAILS
+    assert sum(item.kind == "circle" for item in scene.objects) == 10  # circles kept, only their trails capped

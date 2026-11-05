@@ -25,8 +25,11 @@ DEFAULT_DURATION = 8.0
 DEFAULT_WORLD = (0.0, 10.0, 0.0, 10.0)
 FADE_SECONDS = 0.25
 CAPTION_FADE_SECONDS = 0.3
-TRAIL_SAMPLES = 40
-PLOT_SAMPLES = 80
+TRAIL_SAMPLES = 30
+PLOT_SAMPLES = 60
+# Per-frame cost cap: plots and trails evaluate formulas dozens of times per frame, at 60 fps on the GUI thread.
+MAX_PLOTS = 6
+MAX_TRAILS = 6
 MAX_TITLE_LENGTH = 60
 MAX_TEXT_LENGTH = 80
 MAX_LABEL_LENGTH = 30
@@ -56,7 +59,12 @@ NumberValue = Callable[[float, float], "float | None"]
 
 
 def _is_number(value) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value) and abs(value) <= 1e9
+    except OverflowError:  # a 400-digit JSON integer
+        return False
 
 
 def _number_property(raw) -> NumberValue | None:
@@ -307,6 +315,21 @@ def parse_scene(text: str) -> Scene | None:
 
     objects = [parsed for parsed in (_parse_object(raw) for raw in data["objects"][: MAX_OBJECTS * 3]) if parsed]
     objects = objects[:MAX_OBJECTS]
+    plots_kept = 0
+    trails_kept = 0
+    capped_objects: list[SceneObject] = []
+    for scene_object in objects:
+        if scene_object.kind == "plot":
+            if plots_kept >= MAX_PLOTS:
+                continue
+            plots_kept += 1
+        if scene_object.trail:
+            if trails_kept >= MAX_TRAILS:
+                scene_object.trail = False
+            else:
+                trails_kept += 1
+        capped_objects.append(scene_object)
+    objects = capped_objects
     if not objects:
         return None
 

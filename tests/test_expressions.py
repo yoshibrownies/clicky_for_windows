@@ -114,3 +114,25 @@ def test_length_and_depth_guards():
 
 def test_numbers_are_accepted_as_formulas():
     assert compile_formula("42").evaluate(0) == 42
+
+
+def test_integer_tower_cannot_freeze_the_app():
+    # floor/ceil/round used to return Python ints, so ^ did unbounded big-integer maths (minutes, hundreds of MB).
+    # Run in a subprocess so a regression fails the test instead of hanging the whole suite.
+    import subprocess
+    import sys
+
+    code = (
+        "from clicky.expressions import compile_formula\n"
+        "for text in ['floor(9)^floor(9)^floor(9)', 'ceil(9)^ceil(9)^ceil(9)', 'round(9)^round(9)^round(9)',"
+        " 'floor(3)^floor(5e7)']:\n"
+        "    assert compile_formula(text).evaluate(0) is None, text\n"
+        "print('ok')\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
+    assert result.stdout.strip() == "ok", result.stderr
+
+
+def test_rounding_functions_return_floats():
+    for text in ("floor(2.7)", "ceil(2.1)", "round(2.5)"):
+        assert isinstance(compile_formula(text).evaluate(0), float)

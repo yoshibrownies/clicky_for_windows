@@ -24,7 +24,7 @@ Evaluator = Callable[[float, float], float]
 
 
 def _round_half_up(value: float) -> float:
-    return math.floor(value + 0.5)
+    return float(math.floor(value + 0.5))
 
 
 # name -> (minimum arguments, maximum arguments, implementation)
@@ -39,8 +39,10 @@ FUNCTIONS: dict[str, tuple[int, int, Callable[..., float]]] = {
     "abs": (1, 1, abs),
     "exp": (1, 1, math.exp),
     "log": (1, 1, math.log),
-    "floor": (1, 1, math.floor),
-    "ceil": (1, 1, math.ceil),
+    # float(): math.floor/ceil return Python ints, and int ** int is unbounded big-integer maths that can freeze the
+    # app (floor(9)^floor(9)^floor(9)). Every value in this language stays a float, which overflows fast instead.
+    "floor": (1, 1, lambda value: float(math.floor(value))),
+    "ceil": (1, 1, lambda value: float(math.ceil(value))),
     "round": (1, 1, _round_half_up),
     "min": (1, 8, min),
     "max": (1, 8, max),
@@ -150,7 +152,7 @@ class _Parser:
             self._enter()
             exponent = self._unary()  # right-associative; allows 2^-1
             self._depth -= 1
-            return (lambda a, b: lambda t, x: a(t, x) ** b(t, x))(base, exponent)
+            return (lambda a, b: lambda t, x: float(a(t, x)) ** float(b(t, x)))(base, exponent)
         return base
 
     def _atom(self) -> Evaluator:
@@ -188,7 +190,7 @@ class _Parser:
         if not minimum <= len(arguments) <= maximum:
             raise _ParseError(f"{name} takes {minimum}..{maximum} arguments")
         frozen_arguments = tuple(arguments)
-        return lambda t, x: implementation(*(argument(t, x) for argument in frozen_arguments))
+        return lambda t, x: float(implementation(*(argument(t, x) for argument in frozen_arguments)))
 
 
 class Formula:

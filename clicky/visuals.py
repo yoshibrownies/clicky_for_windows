@@ -24,7 +24,8 @@ TAG_START_PATTERN = re.compile(r"\[([A-Z]{2,12}):")
 KNOWN_TAG_NAMES = frozenset({"POINT", "UNDERLINE", "CIRCLE", "NOTE", "DIAGRAM", "ANIMATE"})
 # Animation scenes are JSON (which needs square brackets), so they live in blocks rather than inline tags:
 # <scene name="roll">{...}</scene>, referenced from the speech by [ANIMATE:roll].
-SCENE_BLOCK_PATTERN = re.compile(r'<scene\s+name\s*=\s*"([^"<>]{1,40})"\s*>(.*?)</scene\s*>', re.DOTALL | re.IGNORECASE)
+SCENE_BLOCK_PATTERN = re.compile(r"<scene\b([^>]*)>(.*?)</scene\s*>", re.DOTALL | re.IGNORECASE)
+SCENE_NAME_PATTERN = re.compile(r"""name\s*=\s*["']([^"'<>]{1,60})["']""", re.IGNORECASE)
 UNFINISHED_SCENE_BLOCK_PATTERN = re.compile(r"<scene\b.*$", re.DOTALL | re.IGNORECASE)
 PARTIAL_SCENE_OPENING_AT_END_PATTERN = re.compile(r"<(?:s(?:c(?:e(?:n(?:e)?)?)?)?)?$", re.IGNORECASE)
 # The start of a tag still being streamed at the very end: "[", "[NO", "[NOTE".
@@ -82,7 +83,10 @@ def extract_scene_blocks(text: str) -> tuple[str, dict[str, str]]:
     scenes: dict[str, str] = {}
 
     def keep(match: re.Match) -> str:
-        scenes.setdefault(match.group(1).strip(), match.group(2).strip())
+        # Any complete block is removed from speech; it only becomes an animation if it carries a name.
+        name_match = SCENE_NAME_PATTERN.search(match.group(1))
+        if name_match:
+            scenes.setdefault(name_match.group(1).strip(), match.group(2).strip())
         return " "
 
     without_blocks = SCENE_BLOCK_PATTERN.sub(keep, text)

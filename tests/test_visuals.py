@@ -152,3 +152,21 @@ def test_visible_text_hides_scene_blocks_while_streaming():
     assert visible_text('ok [ANIMATE:a] then <scene name="a">{"objects": [') == "ok then"
     assert visible_text("ok then <sce") == "ok then"
     assert visible_text(f'ok <scene name="a">{SCENE_JSON}</scene> done') == "ok done"
+
+
+@pytest.mark.parametrize(
+    "opening",
+    ["<scene name='drop'>", '<scene name="drop" duration="7">', '<SCENE NAME="drop">', '<scene  name = "drop" >'],
+)
+def test_slightly_different_scene_blocks_still_work_and_never_swallow_speech(opening):
+    reply = parse_visual_reply(
+        f"balls fall. [ANIMATE:drop] {opening}{SCENE_JSON}</scene> then it lands. [NOTE:gravity] the end."
+    )
+    assert reply.spoken_text == "balls fall. then it lands. the end."
+    assert [event.kind for event in reply.events] == ["animate", "note"]
+
+
+def test_unusable_complete_scene_block_is_removed_without_eating_the_rest():
+    reply = parse_visual_reply(f"balls fall. <scene>{SCENE_JSON}</scene> then it lands. [NOTE:gravity] the end.")
+    assert reply.spoken_text == "balls fall. then it lands. the end."
+    assert [event.kind for event in reply.events] == ["note"]

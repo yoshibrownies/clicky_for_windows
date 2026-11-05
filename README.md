@@ -64,6 +64,11 @@ Clicky explains in plain words, like a patient teacher, and shows you as it goes
 - **Circles** go around the button or icon it means, and the blue buddy can fly over to point.
 - **A notepad** appears at the side of your screen, and Clicky hand-writes the key points on it while it speaks.
 - **Diagrams** (boxes and arrows) draw themselves on the notepad for processes and "how things connect".
+- **Animations** play on a whiteboard next to the notepad: a ball speeding up with its velocity arrow growing,
+  a graph plotting itself, a list being sorted step by step, a pendulum swinging. Clicky writes a fresh little
+  scene for each question in its own safe animation language (shapes, arrows, plots, formulas of time,
+  keyframes); nothing it writes is ever run as code.
+- **Clear it all** any time with **Esc** (while Clicky's marks are showing) or **Clear screen** in the tray menu.
 
 Everything is timed to the speech, can't be clicked (it never gets in your way), and stays out of Clicky's own
 screenshots. Marks fade a few seconds after it finishes, and the notepad after about 20 seconds.
@@ -104,6 +109,7 @@ ElevenLabs usage. Check your dashboards after the first few days.
 | `clicky/visuals.py`, `timeline.py`, `visual_director.py` | Parse the model's inline `[UNDERLINE]`/`[CIRCLE]`/`[NOTE]`/`[DIAGRAM]`/`[POINT]` tags and fire each at its moment in the speech |
 | `clicky/annotations.py` | Hand-drawn animated underlines and circles, one transparent layer per monitor |
 | `clicky/notepad.py`, `diagram.py` | The paper notepad: live handwriting and self-drawing box-and-arrow diagrams |
+| `clicky/scene.py`, `expressions.py`, `whiteboard.py` | The animation language: JSON scenes with safe formulas and keyframes, played on the whiteboard |
 | `clicky/tray.py`, `playback.py`, `app.py` | Tray menu, MP3 playback, wiring |
 | `worker/` | Upstream Cloudflare Worker, unchanged |
 

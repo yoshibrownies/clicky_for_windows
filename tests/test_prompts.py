@@ -45,3 +45,8 @@ def test_every_example_animation_in_the_prompt_parses_and_fires():
         assert scene is not None, example[:60]
         assert scene.frame(scene.duration / 2), "the example should draw something mid-way"
         assert "<scene" not in reply.spoken_text and "{" not in reply.spoken_text
+
+
+def test_prompt_asks_for_the_animation_to_start_early():
+    lowered = COMPANION_SYSTEM_PROMPT.lower()
+    assert "start the animation early" in lowered

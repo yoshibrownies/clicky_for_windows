@@ -15,12 +15,18 @@ MAX_MARKS = 6  # underlines + circles
 MAX_NOTES = 8
 MAX_DIAGRAMS = 1
 MAX_POINTS = 4
+MAX_ANIMATIONS = 1
 MAX_NOTE_LENGTH = 80
 
 # Any [UPPERCASE:...] tag. Known kinds become events; unknown ones are still stripped from speech.
 TAG_PATTERN = re.compile(r"\[([A-Z]{2,12}):([^\[\]]*)\]")
 TAG_START_PATTERN = re.compile(r"\[([A-Z]{2,12}):")
-KNOWN_TAG_NAMES = frozenset({"POINT", "UNDERLINE", "CIRCLE", "NOTE", "DIAGRAM"})
+KNOWN_TAG_NAMES = frozenset({"POINT", "UNDERLINE", "CIRCLE", "NOTE", "DIAGRAM", "ANIMATE"})
+# Animation scenes are JSON (which needs square brackets), so they live in blocks rather than inline tags:
+# <scene name="roll">{...}</scene>, referenced from the speech by [ANIMATE:roll].
+SCENE_BLOCK_PATTERN = re.compile(r'<scene\s+name\s*=\s*"([^"<>]{1,40})"\s*>(.*?)</scene\s*>', re.DOTALL | re.IGNORECASE)
+UNFINISHED_SCENE_BLOCK_PATTERN = re.compile(r"<scene\b.*$", re.DOTALL | re.IGNORECASE)
+PARTIAL_SCENE_OPENING_AT_END_PATTERN = re.compile(r"<(?:s(?:c(?:e(?:n(?:e)?)?)?)?)?$", re.IGNORECASE)
 # The start of a tag still being streamed at the very end: "[", "[NO", "[NOTE".
 PARTIAL_TAG_START_AT_END_PATTERN = re.compile(r"\[[A-Z]*$")
 
@@ -71,8 +77,22 @@ def find_tags(text: str) -> list[_FoundTag]:
         search_from = close_index + 1
 
 
+def extract_scene_blocks(text: str) -> tuple[str, dict[str, str]]:
+    """Remove <scene> blocks (and a half-streamed one at the end); return the remaining text and name -> JSON."""
+    scenes: dict[str, str] = {}
+
+    def keep(match: re.Match) -> str:
+        scenes.setdefault(match.group(1).strip(), match.group(2).strip())
+        return " "
+
+    without_blocks = SCENE_BLOCK_PATTERN.sub(keep, text)
+    without_blocks = UNFINISHED_SCENE_BLOCK_PATTERN.sub(" ", without_blocks)
+    return PARTIAL_SCENE_OPENING_AT_END_PATTERN.sub("", without_blocks), scenes
+
+
 def visible_text(partial_text: str) -> str:
     """Text for the speech bubble while a reply streams in: no tags, not even a half-written last one."""
+    partial_text, _ = extract_scene_blocks(partial_text)
     pieces: list[str] = []
     cursor = 0
     for tag in find_tags(partial_text):
@@ -190,6 +210,7 @@ def clean_spoken_text(text: str) -> str:
 
 
 def parse_visual_reply(response_text: str) -> VisualReply:
+    response_text, scenes = extract_scene_blocks(response_text)
     spoken_parts: list[str] = []
     spoken_length = 0
     pending: list[tuple[str, str, int]] = []
@@ -211,12 +232,17 @@ def parse_visual_reply(response_text: str) -> VisualReply:
         "note": MAX_NOTES,
         "diagram": MAX_DIAGRAMS,
         "point": MAX_POINTS,
+        "animate": MAX_ANIMATIONS,
     }
-    counts = {"marks": 0, "note": 0, "diagram": 0, "point": 0}
+    counts = {"marks": 0, "note": 0, "diagram": 0, "point": 0, "animate": 0}
     events: list[VisualEvent] = []
     for name, body, offset in pending:
         fraction = 0.0 if total_length == 0 else min(1.0, max(0.0, offset / total_length))
-        event = _parse_tag(name, body, fraction)
+        if name == "ANIMATE":
+            scene_json = scenes.get(body.strip())
+            event = VisualEvent(kind="animate", fraction=fraction, text=scene_json) if scene_json else None
+        else:
+            event = _parse_tag(name, body, fraction)
         if event is None:
             continue
         counter_key = "marks" if event.kind in ("underline", "circle") else event.kind

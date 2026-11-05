@@ -462,3 +462,11 @@ def test_offscreen_marks_are_dropped_not_squashed_into_a_corner():
     )
     assert [event.kind for event in events] == ["underline"]
     assert legacy_point is None
+
+
+def test_animate_events_pass_through_with_their_scene_text():
+    from clicky.controller import build_visual_plan
+
+    scene = '{"objects": [{"type": "point", "x": 1, "y": 1}]}'
+    _, _, events = build_visual_plan(f'see [ANIMATE:s] this <scene name="s">{scene}</scene>', [PRIMARY])
+    assert [(event.kind, event.text) for event in events] == [("animate", scene)]

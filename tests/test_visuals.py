@@ -108,3 +108,47 @@ def test_visible_text_hides_bracketed_and_half_streamed_tags():
     assert visible_text("see [NOTE:arr[i") == "see"
     assert visible_text("see [NOTE:arr[i] is fine] then") == "see then"
     assert visible_text("an [array] of things") == "an [array] of things"
+
+
+SCENE_JSON = '{"duration": 4, "objects": [{"type": "circle", "x": "t", "y": 1}]}'
+
+
+def test_animate_marker_picks_up_its_scene_block_and_the_block_is_never_spoken():
+    reply = parse_visual_reply(
+        f'watch the ball roll [ANIMATE:roll] faster and faster. <scene name="roll">{SCENE_JSON}</scene>'
+    )
+    assert reply.spoken_text == "watch the ball roll faster and faster."
+    animate = [event for event in reply.events if event.kind == "animate"]
+    assert len(animate) == 1
+    assert animate[0].text == SCENE_JSON
+    assert 0.3 < animate[0].fraction < 0.6
+
+
+def test_scene_block_can_come_before_the_marker_and_json_brackets_are_fine():
+    scene = '{"objects": [{"type": "rect", "x": 0, "y": 0, "w": 1, "h": [[0, 1], [1, 3]]}]}'
+    reply = parse_visual_reply(f'<scene name="bars">{scene}</scene> the bars grow [ANIMATE:bars] here.')
+    assert reply.spoken_text == "the bars grow here."
+    assert reply.events[0].kind == "animate" and reply.events[0].text == scene
+
+
+def test_marker_without_a_block_and_extra_animations_are_dropped():
+    reply = parse_visual_reply(
+        f'one [ANIMATE:a] two [ANIMATE:missing] three [ANIMATE:b] <scene name="a">{SCENE_JSON}</scene>'
+        f'<scene name="b">{SCENE_JSON}</scene>'
+    )
+    assert [event.kind for event in reply.events] == ["animate"]
+    assert reply.spoken_text == "one two three"
+
+
+def test_unfinished_scene_block_is_never_spoken():
+    reply = parse_visual_reply('look [ANIMATE:a] here. <scene name="a">{"objects": [{"type": ')
+    assert reply.spoken_text == "look here."
+    assert reply.events == ()
+
+
+def test_visible_text_hides_scene_blocks_while_streaming():
+    from clicky.visuals import visible_text
+
+    assert visible_text('ok [ANIMATE:a] then <scene name="a">{"objects": [') == "ok then"
+    assert visible_text("ok then <sce") == "ok then"
+    assert visible_text(f'ok <scene name="a">{SCENE_JSON}</scene> done') == "ok done"

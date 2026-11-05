@@ -12,11 +12,19 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 logger = logging.getLogger(__name__)
 
 
+def progress_fraction(position_ms: int, duration_ms: int) -> float | None:
+    """Playback progress 0..1, or None while the duration is still unknown."""
+    if duration_ms <= 0:
+        return None
+    return min(1.0, max(0.0, position_ms / duration_ms))
+
+
 class SpeechPlayer(QObject):
     """play(mp3_bytes) / stop(). Emits `finished` once per play, whether it ended, failed or was stopped."""
 
     finished = Signal()
     started = Signal()
+    progress = Signal(float)  # 0..1 while playing; drives the timing of underlines and notes
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -27,6 +35,8 @@ class SpeechPlayer(QObject):
         self._player.mediaStatusChanged.connect(self._on_media_status_changed)
         self._player.playbackStateChanged.connect(self._on_playback_state_changed)
         self._player.errorOccurred.connect(self._on_error)
+        # Qt 6 reports position a few times a second, enough to time phrase-level marks.
+        self._player.positionChanged.connect(self._on_position_changed)
         self._current_file_path: str | None = None
         self._is_playing = False
 
@@ -67,6 +77,13 @@ class SpeechPlayer(QObject):
                 os.remove(file_path)
             except OSError:
                 logger.debug("Could not delete %s yet", file_path)
+
+    def _on_position_changed(self, position_ms: int) -> None:
+        if not self._is_playing:
+            return
+        fraction = progress_fraction(position_ms, self._player.duration())
+        if fraction is not None:
+            self.progress.emit(fraction)
 
     def _on_media_status_changed(self, status: QMediaPlayer.MediaStatus) -> None:
         if status == QMediaPlayer.MediaStatus.EndOfMedia:

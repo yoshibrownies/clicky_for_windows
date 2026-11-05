@@ -8,7 +8,8 @@ Python 3.13 + PySide6 port of farzaa/clicky. Read `docs/design.md` before changi
 - Run: `.venv\Scripts\python -m clicky` (needs `CLICKY_WORKER_URL`)
 
 ## Rules
-- `worker/` is the upstream Worker and stays byte-for-byte unchanged. The app must work with it as-is
+- `worker/src/` is the upstream Worker code and stays byte-for-byte unchanged (only the `ELEVENLABS_VOICE_ID`
+  setting in `worker/wrangler.toml` differs: a default voice free ElevenLabs plans can use). The app must work with it as-is
   (it serves only `/chat`, `/tts`, `/transcribe-token` and forwards no client headers).
 - No API keys in the app, repo, tests or logs.
 - Threading: Qt objects on the GUI thread only; network on `AsyncRunner`'s loop; cross-thread results go through

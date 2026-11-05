@@ -8,12 +8,15 @@ from urllib.parse import urlparse
 
 DEFAULT_HOTKEY = "ctrl+alt"
 DEFAULT_MODEL = "claude-opus-5-5"
-DEFAULT_EFFORT = "low"
-ALLOWED_EFFORT_LEVELS = ("low", "medium", "high")
+DEFAULT_EFFORT = "medium"
+# Tray "Thinking" menu labels. Same names work for Claude (output_config.effort) and OpenAI (reasoning_effort).
+EFFORT_LEVELS = {"low": "Fast", "medium": "Balanced", "high": "Deep"}
+ALLOWED_EFFORT_LEVELS = tuple(EFFORT_LEVELS)
 AVAILABLE_MODELS = {
     "claude-opus-5-5": "Claude Opus 5.5",
     "claude-sonnet-5-5": "Claude Sonnet 5.5",
     "gpt-6.1-terra": "GPT-6.1 Terra (OpenAI)",
+    "gpt-6.1-sol": "GPT-6.1 Sol (OpenAI, smartest)",
     "gpt-6-luna": "GPT-6 Luna (OpenAI, cheapest)",
 }
 

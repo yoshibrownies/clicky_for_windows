@@ -334,3 +334,13 @@ def test_openai_model_gets_an_openai_shaped_request(qt_app, runner):
     assert body["reasoning_effort"] == "low"
     assert body["messages"][0]["role"] == "developer"
     assert "output_config" not in body
+
+
+def test_set_effort_changes_the_next_request(qt_app, runner):
+    services = FakeServices()
+    controller, _, _, _ = make_controller(runner, services)
+    controller.set_effort("high")
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    assert services.request_bodies[0]["output_config"] == {"effort": "high"}

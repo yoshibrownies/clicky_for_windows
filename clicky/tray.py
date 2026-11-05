@@ -44,6 +44,8 @@ def draw_tray_icon(fill_color: QColor) -> QIcon:
 class ClickyTray(QObject):
     model_selected = Signal(str)
     always_visible_toggled = Signal(bool)
+    effort_selected = Signal(str)
+    notepad_toggled = Signal(bool)
     forget_requested = Signal()
     quit_requested = Signal()
 
@@ -54,6 +56,9 @@ class ClickyTray(QObject):
         models: Mapping[str, str],
         selected_model: str,
         always_visible: bool,
+        effort_levels: Mapping[str, str] | None = None,
+        selected_effort: str = "medium",
+        notepad_visible: bool = True,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -79,6 +84,30 @@ class ClickyTray(QObject):
             model_action.triggered.connect(self._make_model_handler(model_id))
             model_group.addAction(model_action)
             model_menu.addAction(model_action)
+
+        if effort_levels:
+            thinking_menu = self._menu.addMenu("Thinking")
+            effort_group = QActionGroup(thinking_menu)
+            effort_group.setExclusive(True)
+            effort_hints = {
+                "low": "quickest replies",
+                "medium": "smarter, a bit slower",
+                "high": "most careful, slowest",
+            }
+            for effort_id, effort_name in effort_levels.items():
+                hint = effort_hints.get(effort_id)
+                effort_action = QAction(
+                    f"{effort_name} ({hint})" if hint else effort_name, thinking_menu, checkable=True
+                )
+                effort_action.setChecked(effort_id == selected_effort)
+                effort_action.triggered.connect(self._make_effort_handler(effort_id))
+                effort_group.addAction(effort_action)
+                thinking_menu.addAction(effort_action)
+
+        notepad_action = QAction("Show notepad", self._menu, checkable=True)
+        notepad_action.setChecked(notepad_visible)
+        notepad_action.toggled.connect(self.notepad_toggled.emit)
+        self._menu.addAction(notepad_action)
 
         always_visible_action = QAction("Always show buddy", self._menu, checkable=True)
         always_visible_action.setChecked(always_visible)
@@ -108,6 +137,13 @@ class ClickyTray(QObject):
                 self.model_selected.emit(model_id)
 
         return handle_model_triggered
+
+    def _make_effort_handler(self, effort_id: str) -> Callable[[bool], None]:
+        def handle_effort_triggered(checked: bool) -> None:
+            if checked:
+                self.effort_selected.emit(effort_id)
+
+        return handle_effort_triggered
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:

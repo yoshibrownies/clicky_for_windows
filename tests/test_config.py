@@ -25,7 +25,7 @@ def test_defaults():
     settings = load_settings({"CLICKY_WORKER_URL": "http://localhost:8787"})
     assert settings.hotkey == "ctrl+alt"
     assert settings.model == "claude-opus-5-5"
-    assert settings.effort == "low"
+    assert settings.effort == "medium"
 
 
 def test_blank_values_fall_back_to_defaults():
@@ -48,3 +48,10 @@ def test_placeholder_url_is_rejected():
 def test_invalid_effort_raises():
     with pytest.raises(ConfigError):
         load_settings({"CLICKY_WORKER_URL": "http://localhost:8787", "CLICKY_EFFORT": "turbo"})
+
+
+def test_effort_levels_and_models_for_the_tray():
+    from clicky.config import AVAILABLE_MODELS, EFFORT_LEVELS
+
+    assert EFFORT_LEVELS == {"low": "Fast", "medium": "Balanced", "high": "Deep"}
+    assert "gpt-6.1-sol" in AVAILABLE_MODELS

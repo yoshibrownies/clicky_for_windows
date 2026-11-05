@@ -134,3 +134,29 @@ def test_hidden_idle_overlay_slows_its_timer(qt_app):
         assert overlay._frame_timer.interval() <= 20
     finally:
         overlay.close()
+
+
+def test_tray_thinking_menu_and_notepad_toggle(qt_app):
+    from clicky.config import EFFORT_LEVELS
+    from clicky.tray import ClickyTray
+
+    tray = ClickyTray(
+        hotkey_text="ctrl+alt",
+        models=AVAILABLE_MODELS,
+        selected_model="gpt-6.1-terra",
+        always_visible=True,
+        effort_levels=EFFORT_LEVELS,
+        selected_effort="medium",
+        notepad_visible=True,
+    )
+    efforts, notepad_states = [], []
+    tray.effort_selected.connect(efforts.append)
+    tray.notepad_toggled.connect(notepad_states.append)
+    thinking_menu = next(action.menu() for action in tray._menu.actions() if action.text() == "Thinking")
+    deep_action = next(action for action in thinking_menu.actions() if action.text().startswith("Deep"))
+    deep_action.trigger()
+    notepad_action = next(action for action in tray._menu.actions() if action.text() == "Show notepad")
+    assert notepad_action.isChecked()
+    notepad_action.trigger()
+    assert efforts == ["high"]
+    assert notepad_states == [False]

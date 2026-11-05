@@ -227,6 +227,9 @@ class CompanionController(QObject):
     def set_model(self, model: str) -> None:
         self.model = model
 
+    def set_effort(self, effort: str) -> None:
+        self.effort = effort
+
     def shutdown(self) -> None:
         self._abort_current_interaction()
 

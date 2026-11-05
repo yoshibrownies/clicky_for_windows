@@ -344,3 +344,57 @@ def test_set_effort_changes_the_next_request(qt_app, runner):
     controller.handle_push_to_talk_released()
     wait_until(lambda: controller.state is CompanionState.RESPONDING)
     assert services.request_bodies[0]["output_config"] == {"effort": "high"}
+
+
+def run_reply(runner, reply_chunks, stop_reason="end_turn"):
+    services = FakeServices(reply_chunks=reply_chunks, stop_reason=stop_reason)
+    controller, player, _, recorded = make_controller(runner, services)
+    plans = []
+    controller.visuals_ready.connect(plans.append)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    return services, recorded, plans
+
+
+def test_visual_tags_become_screen_events_and_never_reach_the_voice(qt_app, runner):
+    services, recorded, plans = run_reply(
+        runner,
+        (
+            "look at [UNDERLINE:0,0,1600,900] this line ",
+            "[NOTE:a key idea] and here [POINT:800,450:mid] ",
+            "is the end [POINT:0,0:corner:screen2]",
+        ),
+    )
+    assert services.spoken == ["look at this line and here is the end"]
+    plan = plans[0]
+    assert plan.spoken_text == "look at this line and here is the end"
+    assert plan.has_audio
+    kinds = [event.kind for event in plan.events]
+    assert kinds == ["underline", "note", "point"]
+    underline, note, point = plan.events
+    assert underline.box == (0, 0, 2559, 1439)  # PRIMARY: 2560x1440 logical, image 1600x900
+    assert note.text == "a key idea"
+    assert point.point == (1280, 720) and point.label == "mid"
+    assert [event.fraction for event in plan.events] == sorted(event.fraction for event in plan.events)
+    # The tag at the very end keeps the classic behaviour: the buddy flies there straight away.
+    legacy = recorded["points"][0]
+    assert (legacy.global_x, legacy.global_y, legacy.label) == (2560, 0, "corner")
+
+
+def test_marks_on_the_second_screen_are_mapped_there(qt_app, runner):
+    _, _, plans = run_reply(runner, ("over there [CIRCLE:0,0,800,450:screen2] ok",))
+    assert plans[0].events[0].box == (2560, 0, 2560 + 960, 540)
+
+
+def test_refusal_has_no_visuals(qt_app, runner):
+    services, _, plans = run_reply(runner, ("[NOTE:secret]",), stop_reason="refusal")
+    assert plans[0].events == ()
+    assert services.spoken == [REFUSAL_SPOKEN_REPLY]
+
+
+def test_streaming_bubble_hides_every_kind_of_tag():
+    assert visible_reply_text("this line [UNDERLINE:1,2,3,4] repeats [NOTE:loop] it") == "this line repeats it"
+    assert visible_reply_text("see [CIRCLE:10,20") == "see"
+    assert visible_reply_text("steps: [DIAGRAM:a -> b") == "steps:"
+    assert visible_reply_text("an [array] of things") == "an [array] of things"

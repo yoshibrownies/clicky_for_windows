@@ -120,7 +120,7 @@ def _parse_tag(name: str, body: str, fraction: float) -> VisualEvent | None:
     return None
 
 
-def _clean_speech(text: str) -> str:
+def clean_spoken_text(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"\s+([.,!?;:])", r"\1", text)
     return text.strip()
@@ -161,4 +161,4 @@ def parse_visual_reply(response_text: str) -> VisualReply:
         counts[counter_key] += 1
         events.append(event)
 
-    return VisualReply(spoken_text=_clean_speech(raw_spoken), events=tuple(events))
+    return VisualReply(spoken_text=clean_spoken_text(raw_spoken), events=tuple(events))

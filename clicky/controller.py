@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
+import re
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -29,6 +30,7 @@ from clicky.openai_client import build_openai_chat_request_body
 from clicky.pointing import parse_point_tag
 from clicky.prompts import COMPANION_SYSTEM_PROMPT, REFUSAL_SPOKEN_REPLY
 from clicky.screens import ScreenCapture, map_image_point_to_screen
+from clicky.visuals import TAG_PATTERN, clean_spoken_text, parse_visual_reply
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +72,32 @@ class PointTarget:
 
 
 @dataclass(frozen=True)
+class ScreenVisualEvent:
+    """A visual tag mapped onto the desktop (Qt global logical coordinates), ready to draw."""
+
+    kind: str  # "point" | "underline" | "circle" | "note" | "diagram"
+    fraction: float
+    box: tuple[int, int, int, int] | None = None
+    point: tuple[int, int] | None = None
+    label: str = ""
+    text: str = ""
+
+
+@dataclass(frozen=True)
+class VisualPlan:
+    spoken_text: str
+    events: tuple[ScreenVisualEvent, ...]
+    has_audio: bool
+
+
+@dataclass(frozen=True)
 class CompanionReply:
     generation: int
     spoken_text: str
     point_target: PointTarget | None
     speech_audio: bytes | None
     speech_error: str | None
+    visual_events: tuple[ScreenVisualEvent, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -103,13 +125,63 @@ def resolve_point_target(reply_text: str, screen_captures: Sequence[ScreenCaptur
     return pointing.spoken_text, PointTarget(global_x, global_y, pointing.label or "")
 
 
+# A POINT this close to the end is the classic "point while answering" tag: fly there straight away.
+LEGACY_POINT_FRACTION = 0.9
+
+
+def build_visual_plan(
+    reply_text: str, screen_captures: Sequence[ScreenCapture]
+) -> tuple[str, PointTarget | None, tuple[ScreenVisualEvent, ...]]:
+    """Split a reply into spoken text, an immediate (end-of-reply) point, and timed screen events."""
+    visual_reply = parse_visual_reply(reply_text)
+    legacy_point: PointTarget | None = None
+    screen_events: list[ScreenVisualEvent] = []
+
+    def capture_for(screen_number: int | None) -> ScreenCapture | None:
+        if not screen_captures:
+            return None
+        if screen_number is not None and 1 <= screen_number <= len(screen_captures):
+            return screen_captures[screen_number - 1]
+        return screen_captures[0]
+
+    def to_screen(capture: ScreenCapture, image_point: tuple[int, int]) -> tuple[int, int]:
+        return map_image_point_to_screen(image_point, (capture.image_width, capture.image_height), capture.geometry)
+
+    for event in visual_reply.events:
+        if event.kind in ("note", "diagram"):
+            screen_events.append(ScreenVisualEvent(kind=event.kind, fraction=event.fraction, text=event.text))
+            continue
+        capture = capture_for(event.screen_number)
+        if capture is None:
+            continue  # nothing to map onto (screen capture failed)
+        if event.kind == "point" and event.point is not None:
+            global_x, global_y = to_screen(capture, event.point)
+            if event.fraction >= LEGACY_POINT_FRACTION and legacy_point is None:
+                legacy_point = PointTarget(global_x, global_y, event.label)
+            else:
+                screen_events.append(
+                    ScreenVisualEvent(
+                        kind="point", fraction=event.fraction, point=(global_x, global_y), label=event.label
+                    )
+                )
+        elif event.box is not None:
+            left, top = to_screen(capture, (event.box[0], event.box[1]))
+            right, bottom = to_screen(capture, (event.box[2], event.box[3]))
+            screen_events.append(
+                ScreenVisualEvent(kind=event.kind, fraction=event.fraction, box=(left, top, right, bottom))
+            )
+    return visual_reply.spoken_text, legacy_point, tuple(screen_events)
+
+
+# A tag still being streamed: '[', '[NO', '[NOTE:half written' at the very end.
+PARTIAL_TAG_AT_END_PATTERN = re.compile(r"\[[A-Z]*(?::[^\[\]]*)?$")
+
+
 def visible_reply_text(partial_reply: str) -> str:
-    """What the speech bubble shows while streaming: everything before a (possibly half-written) tag."""
-    visible_text = partial_reply.split("[POINT", 1)[0]
-    last_bracket_index = visible_text.rfind("[")
-    if last_bracket_index != -1 and "[POINT".startswith(visible_text[last_bracket_index:]):
-        visible_text = visible_text[:last_bracket_index]
-    return visible_text.rstrip()
+    """What the speech bubble shows while streaming: the text without tags, including a half-written last one."""
+    without_complete_tags = TAG_PATTERN.sub(" ", partial_reply)
+    without_partial_tag = PARTIAL_TAG_AT_END_PATTERN.sub("", without_complete_tags)
+    return clean_spoken_text(without_partial_tag)
 
 
 class CompanionController(QObject):
@@ -118,6 +190,7 @@ class CompanionController(QObject):
     transcript_changed = Signal(str)
     reply_text_changed = Signal(str)
     point_requested = Signal(object)  # PointTarget
+    visuals_ready = Signal(object)  # VisualPlan: timed underlines, circles, notes, diagrams, points
     notice = Signal(str)  # short message shown in the bubble (errors, "didn't catch that")
 
     # Internal: emitted from the asyncio thread, delivered on the GUI thread.
@@ -276,13 +349,14 @@ class CompanionController(QObject):
                 elif isinstance(stream_event, StreamFinished):
                     stop_reason = stream_event.stop_reason
 
+            visual_events: tuple[ScreenVisualEvent, ...] = ()
             if stop_reason == "refusal":
                 spoken_text, point_target = REFUSAL_SPOKEN_REPLY, None
             else:
-                spoken_text, point_target = resolve_point_target(reply_text, screen_captures)
+                spoken_text, point_target, visual_events = build_visual_plan(reply_text, screen_captures)
                 self.history.add(transcript, reply_text)
             if not spoken_text:
-                spoken_text = "hmm, i don't have anything to say to that."
+                spoken_text = "here you go." if visual_events else "hmm, i don't have anything to say to that."
 
             speech_audio: bytes | None = None
             speech_error: str | None = None
@@ -292,7 +366,9 @@ class CompanionController(QObject):
                 logger.warning("Text-to-speech failed: %s", tts_error)
                 speech_error = str(tts_error)
 
-            self._reply_ready.emit(CompanionReply(generation, spoken_text, point_target, speech_audio, speech_error))
+            self._reply_ready.emit(
+                CompanionReply(generation, spoken_text, point_target, speech_audio, speech_error, visual_events)
+            )
         except asyncio.CancelledError:
             raise
         except Exception as interaction_error:
@@ -342,6 +418,7 @@ class CompanionController(QObject):
         if not self._is_current(reply.generation):
             return
         self.reply_text_changed.emit(reply.spoken_text)
+        self.visuals_ready.emit(VisualPlan(reply.spoken_text, reply.visual_events, reply.speech_audio is not None))
         if reply.point_target is not None:
             self.point_requested.emit(reply.point_target)
         if reply.speech_audio is None:

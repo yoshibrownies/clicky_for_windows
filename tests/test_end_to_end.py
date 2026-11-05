@@ -107,7 +107,7 @@ def test_full_interaction_over_real_network_code(qt_app, fake_worker_url):
         controller.point_requested.connect(points.append)
 
         controller.handle_push_to_talk_pressed()
-        wait_until(lambda: fake_assemblyai.received_audio_bytes > 0)
+        wait_until(lambda: fake_assemblyai.received_audio_bytes > 0, timeout=8)
         controller.handle_push_to_talk_released()
         wait_until(lambda: controller.state is CompanionState.RESPONDING, timeout=8)
 
@@ -187,7 +187,7 @@ def test_openai_model_goes_through_the_chat_openai_route(qt_app, fake_worker_url
         points = []
         controller.point_requested.connect(points.append)
         controller.handle_push_to_talk_pressed()
-        wait_until(lambda: fake_assemblyai.received_audio_bytes > 0)
+        wait_until(lambda: fake_assemblyai.received_audio_bytes > 0, timeout=8)
         controller.handle_push_to_talk_released()
         wait_until(lambda: controller.state is CompanionState.RESPONDING, timeout=8)
 

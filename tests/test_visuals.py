@@ -1,0 +1,88 @@
+import pytest
+
+from clicky.visuals import MAX_MARKS, MAX_NOTES, parse_visual_reply
+
+
+def test_plain_text_has_no_events():
+    reply = parse_visual_reply("just an answer.")
+    assert reply.spoken_text == "just an answer."
+    assert reply.events == ()
+
+
+def test_every_kind_is_parsed_with_its_payload():
+    reply = parse_visual_reply(
+        "see this word [UNDERLINE:100,200,300,220] and that button [CIRCLE:400,50,480,90:screen2] "
+        "[NOTE: Step 1: open the menu] then [DIAGRAM:Input -> Process -> Output] "
+        "over here [POINT:600,700:save button:screen2]"
+    )
+    kinds = [event.kind for event in reply.events]
+    assert kinds == ["underline", "circle", "note", "diagram", "point"]
+    underline, circle, note, diagram, point = reply.events
+    assert underline.box == (100, 200, 300, 220) and underline.screen_number is None
+    assert circle.box == (400, 50, 480, 90) and circle.screen_number == 2
+    assert note.text == "Step 1: open the menu"
+    assert diagram.text == "Input -> Process -> Output"
+    assert point.point == (600, 700) and point.label == "save button" and point.screen_number == 2
+
+
+def test_tags_are_removed_from_speech_and_spacing_cleaned():
+    reply = parse_visual_reply("click [UNDERLINE:1,2,30,4] save , then [NOTE:save it] done [POINT:none]")
+    assert reply.spoken_text == "click save, then done"
+
+
+def test_fractions_follow_position_in_speech():
+    reply = parse_visual_reply("[NOTE:a]first half of the sentence [NOTE:b]second half of it[NOTE:c]")
+    fractions = [event.fraction for event in reply.events]
+    assert fractions[0] == 0.0
+    assert 0.4 < fractions[1] < 0.75
+    assert fractions[2] == pytest.approx(1.0)
+    assert fractions == sorted(fractions)
+
+
+def test_tag_only_reply_gives_empty_speech_and_zero_fraction():
+    reply = parse_visual_reply("[NOTE:just a note]")
+    assert reply.spoken_text == ""
+    assert reply.events[0].fraction == 0.0
+
+
+def test_boxes_are_normalised_so_corners_are_ordered():
+    reply = parse_visual_reply("x [UNDERLINE:300,220,100,200]")
+    assert reply.events[0].box == (100, 200, 300, 220)
+
+
+@pytest.mark.parametrize(
+    "bad_tag",
+    [
+        "[UNDERLINE:1,2,3]",
+        "[UNDERLINE:a,b,c,d]",
+        "[CIRCLE:5,5,5,5]",
+        "[NOTE:   ]",
+        "[DIAGRAM:just words no arrows]",
+        "[POINT:12]",
+        "[SPARKLE:1,2]",
+        "[UNDERLINE:1,2,3,4:screenX]",
+    ],
+)
+def test_malformed_and_unknown_tags_are_dropped_from_speech_and_events(bad_tag):
+    reply = parse_visual_reply(f"hello {bad_tag} world")
+    assert reply.events == ()
+    assert reply.spoken_text == "hello world"
+
+
+def test_lowercase_brackets_in_speech_are_left_alone():
+    assert parse_visual_reply("an [array] of things").spoken_text == "an [array] of things"
+
+
+def test_limits_are_applied():
+    marks = " ".join(f"w{index} [UNDERLINE:{index},0,{index + 10},5]" for index in range(10))
+    notes = " ".join(f"[NOTE:note {index}]" for index in range(12))
+    diagrams = "[DIAGRAM:A -> B] [DIAGRAM:C -> D]"
+    reply = parse_visual_reply(f"{marks} {notes} {diagrams}")
+    assert sum(event.kind == "underline" for event in reply.events) == MAX_MARKS
+    assert sum(event.kind == "note" for event in reply.events) == MAX_NOTES
+    assert [event.text for event in reply.events if event.kind == "diagram"] == ["A -> B"]
+
+
+def test_long_notes_are_truncated():
+    reply = parse_visual_reply("[NOTE:" + "x" * 200 + "]")
+    assert len(reply.events[0].text) <= 80

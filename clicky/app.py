@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from PySide6.QtCore import QLockFile, QObject, QStandardPaths, Signal
@@ -57,13 +59,55 @@ def configure_logging() -> Path:
     return log_path
 
 
+def install_exception_logging() -> None:
+    """Send uncaught exceptions (Qt slots, paint events, plain threads) to the log.
+
+    PySide prints slot exceptions to sys.stderr, which is None under pythonw.exe, so without this a bug in,
+    say, the overlay's paintEvent would vanish without a trace."""
+
+    def log_uncaught_exception(exception_type, exception, traceback) -> None:
+        if issubclass(exception_type, KeyboardInterrupt):
+            sys.__excepthook__(exception_type, exception, traceback)
+            return
+        logger.critical("Uncaught exception", exc_info=(exception_type, exception, traceback))
+
+    def log_uncaught_thread_exception(arguments: threading.ExceptHookArgs) -> None:
+        thread_name = arguments.thread.name if arguments.thread is not None else "unknown"
+        logger.critical(
+            "Uncaught exception in thread %s",
+            thread_name,
+            exc_info=(arguments.exc_type, arguments.exc_value, arguments.exc_traceback),
+        )
+
+    sys.excepthook = log_uncaught_exception
+    threading.excepthook = log_uncaught_thread_exception
+
+
+def mask_worker_url(worker_url: str) -> str:
+    """The Worker has no auth, so its URL can spend the owner's API credit: never write it to logs in full."""
+    parsed_url = urlparse(worker_url)
+    host = parsed_url.hostname or ""
+    if host in ("localhost", "127.0.0.1", "::1"):
+        return worker_url
+    first_label = host.split(".", 1)[0]
+    return f"{parsed_url.scheme}://{first_label[:4]}…(hidden)"
+
+
 def show_fatal_error(message: str) -> None:
     logger.error(message)
     QMessageBox.critical(None, "Clicky", message)
 
 
 def main() -> int:
-    log_path = configure_logging()
+    try:
+        log_path = configure_logging()
+    except OSError as logging_error:
+        # Still tell the user something under pythonw, where there is no console.
+        application = QApplication(sys.argv)
+        QMessageBox.critical(None, "Clicky", f"Couldn't create the log file: {logging_error}")
+        del application
+        return 1
+    install_exception_logging()
     load_dotenv(PROJECT_ROOT / ".env")
     load_dotenv()  # also a .env in the current folder, if any
 
@@ -151,6 +195,9 @@ def main() -> int:
     overlay.show_notice(f"hi! hold {tray.pretty_hotkey} and talk to me.")
     tray.show_message("Clicky is running", f"Hold {tray.pretty_hotkey} and talk. Logs: {log_path}")
     logger.info(
-        "Clicky started (worker %s, model %s, hotkey %s)", settings.worker_base_url, settings.model, settings.hotkey
+        "Clicky started (worker %s, model %s, hotkey %s)",
+        mask_worker_url(settings.worker_base_url),
+        settings.model,
+        settings.hotkey,
     )
     return application.exec()

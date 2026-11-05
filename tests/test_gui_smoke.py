@@ -98,3 +98,39 @@ def test_hotkey_bridge_forwards_events(qt_app):
     for event in (PushToTalkEvent.PRESSED, PushToTalkEvent.RELEASED, PushToTalkEvent.CANCELLED):
         bridge.forward(event)
     assert received == ["pressed", "released", "cancelled"]
+
+
+def test_idle_overlay_stops_repainting_and_uses_a_coarse_timer(qt_app):
+    from PySide6.QtCore import Qt
+
+    from clicky.overlay import BuddyOverlay
+
+    overlay = BuddyOverlay()
+    try:
+        assert overlay._frame_timer.timerType() != Qt.TimerType.PreciseTimer
+        pump(0.8)  # fade in and settle next to the (unmoving) cursor
+        update_calls = []
+        original_update = overlay.update
+        overlay.update = lambda *arguments: (update_calls.append(1), original_update(*arguments))
+        pump(0.5)
+        assert len(update_calls) <= 2, f"idle overlay repainted {len(update_calls)} times in 0.5 s"
+        overlay.set_state("listening")  # animating states still repaint every frame
+        pump(0.3)
+        assert len(update_calls) >= 10
+    finally:
+        overlay.close()
+
+
+def test_hidden_idle_overlay_slows_its_timer(qt_app):
+    from clicky.overlay import BuddyOverlay
+
+    overlay = BuddyOverlay()
+    try:
+        overlay.set_always_visible(False)
+        pump(1.6)  # past the idle fade delay
+        assert not overlay.isVisible()
+        assert overlay._frame_timer.interval() >= 100
+        overlay.set_state("listening")
+        assert overlay._frame_timer.interval() <= 20
+    finally:
+        overlay.close()

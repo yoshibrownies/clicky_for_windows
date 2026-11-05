@@ -74,6 +74,20 @@ class TurnTranscriptTracker:
         self._completed_turns: dict[int, tuple[str, bool]] = {}
         self._active_turn_order: int | None = None
         self._active_turn_text = ""
+        self.last_handled_turn_order = -1
+
+    @property
+    def active_turn_order(self) -> int | None:
+        """turn_order of the turn still in progress, or None when the speaker is between turns."""
+        return self._active_turn_order
+
+    @property
+    def latest_completed_turn(self) -> tuple[int, bool] | None:
+        """(turn_order, is_formatted) of the highest completed turn, if any."""
+        if not self._completed_turns:
+            return None
+        latest_order = max(self._completed_turns)
+        return latest_order, self._completed_turns[latest_order][1]
 
     def handle_turn(self, turn_message: dict) -> bool:
         """Apply one Turn message. Returns True when it completed a turn."""
@@ -85,6 +99,7 @@ class TurnTranscriptTracker:
             else:
                 turn_order = max(self._completed_turns, default=-1) + 1
 
+        self.last_handled_turn_order = turn_order
         is_formatted = turn_message.get("turn_is_formatted") is True
         completed_turn = turn_message.get("end_of_turn") is True or is_formatted
         if completed_turn:
@@ -122,10 +137,13 @@ class AssemblyAIStreamingSession:
         self._connection: ClientConnection | None = None
         self._receiver_task: asyncio.Task | None = None
         self._session_began: asyncio.Future | None = None
-        self._awaiting_final_transcript = False
+        # After release: only turns with turn_order >= this count as "the final turn" (an earlier turn's
+        # late formatted copy must not end the wait early).
+        self._final_turn_minimum_order: int | None = None
         self._final_turn_ended = asyncio.Event()
         self._final_turn_formatted = asyncio.Event()
         self._terminated = asyncio.Event()
+        self._closing_by_us = False
         self._closed = False
         self._error: str | None = None
 
@@ -143,10 +161,12 @@ class AssemblyAIStreamingSession:
         try:
             await asyncio.wait_for(asyncio.shield(self._session_began), timeout=self._open_timeout)
         except TimeoutError as timeout_error:
-            await self.cancel()
+            await self._close(send_terminate=False)
             raise TranscriptionError("AssemblyAI didn't start the session in time.") from timeout_error
-        except TranscriptionError:
-            await self.cancel()
+        except BaseException:
+            # TranscriptionError from the server, or the interaction being cancelled mid-open: either way the
+            # socket must not outlive this call, or it keeps an AssemblyAI session (and its billing) open.
+            await asyncio.shield(self._close(send_terminate=False))
             raise
 
     async def send_audio(self, pcm16_audio: bytes) -> None:
@@ -154,40 +174,54 @@ class AssemblyAIStreamingSession:
             return
         try:
             await self._connection.send(pcm16_audio)
-        except websockets.ConnectionClosed:
+        except websockets.ConnectionClosed as closed_error:
+            self._record_unexpected_close(closed_error)
             self._closed = True
 
     async def finish(self, timeout: float = FINAL_TRANSCRIPT_TIMEOUT_SECONDS) -> str:
         """Ask AssemblyAI to close the current turn and return the best transcript available."""
-        if self._connection is None or self._closed:
-            return self._tracker.full_transcript()
-        self._awaiting_final_transcript = True
-        await self._send_control_message("ForceEndpoint")
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(self._final_turn_ended.wait(), timeout=timeout)
-        if self._final_turn_ended.is_set() and not self._final_turn_formatted.is_set():
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._final_turn_formatted.wait(), timeout=FORMATTED_TURN_GRACE_SECONDS)
+        if self._connection is not None and not self._closed:
+            active_turn_order = self._tracker.active_turn_order
+            latest_completed_turn = self._tracker.latest_completed_turn
+            if active_turn_order is not None:
+                # Mid-sentence: force that turn to end and wait for it.
+                self._final_turn_minimum_order = active_turn_order
+                await self._send_control_message("ForceEndpoint")
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(self._final_turn_ended.wait(), timeout=timeout)
+                if self._final_turn_ended.is_set() and not self._final_turn_formatted.is_set():
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(self._final_turn_formatted.wait(), timeout=FORMATTED_TURN_GRACE_SECONDS)
+            elif latest_completed_turn is not None and not latest_completed_turn[1]:
+                # Between turns but the last one isn't formatted yet: wait briefly for its formatted copy.
+                self._final_turn_minimum_order = latest_completed_turn[0]
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(self._final_turn_formatted.wait(), timeout=FORMATTED_TURN_GRACE_SECONDS)
+            # Otherwise nothing is pending: no wait at all.
         transcript = self._tracker.full_transcript()
         await self._close(send_terminate=True)
         if not transcript and self._error:
             raise TranscriptionError(self._error)
+        if self._error:
+            logger.warning("Returning partial transcript after AssemblyAI error: %s", self._error)
         return transcript
 
     async def cancel(self) -> None:
         await self._close(send_terminate=True)
 
     async def _send_control_message(self, message_type: str) -> None:
-        if self._connection is None:
+        if self._connection is None or self._closed:
             return
         try:
             await self._connection.send(json.dumps({"type": message_type}))
-        except websockets.ConnectionClosed:
+        except websockets.ConnectionClosed as closed_error:
+            self._record_unexpected_close(closed_error)
             self._closed = True
 
     async def _close(self, send_terminate: bool) -> None:
-        if self._closed and self._connection is None:
+        if self._closed and self._connection is None and self._receiver_task is None:
             return
+        self._closing_by_us = True
         connection = self._connection
         if connection is not None:
             if send_terminate and not self._closed:
@@ -204,12 +238,39 @@ class AssemblyAIStreamingSession:
                 await self._receiver_task
             self._receiver_task = None
 
+    def _record_unexpected_close(self, closed_error: websockets.ConnectionClosed) -> None:
+        """AssemblyAI reports most failures (limits, bad audio, expired session) by closing with a code."""
+        if self._closing_by_us or self._error:
+            return
+        close_frame = closed_error.rcvd
+        if close_frame is not None and close_frame.code == 1000:
+            return
+        if close_frame is None:
+            self._error = "Lost the connection to AssemblyAI."
+        else:
+            self._error = (
+                f"AssemblyAI ended the session ({close_frame.code}): {close_frame.reason or 'no reason given'}"
+            )
+        logger.warning("%s", self._error)
+
     def _fail(self, message: str) -> None:
         self._error = message
+        logger.warning("AssemblyAI error: %s", message)
         if self._session_began is not None and not self._session_began.done():
             self._session_began.set_exception(TranscriptionError(message))
         self._final_turn_ended.set()
         self._final_turn_formatted.set()
+
+    def _handle_turn_message(self, message: dict) -> None:
+        completed_turn = self._tracker.handle_turn(message)
+        full_transcript = self._tracker.full_transcript()
+        if full_transcript and self._on_transcript_update is not None:
+            self._on_transcript_update(full_transcript)
+        minimum_order = self._final_turn_minimum_order
+        if completed_turn and minimum_order is not None and self._tracker.last_handled_turn_order >= minimum_order:
+            self._final_turn_ended.set()
+            if message.get("turn_is_formatted") is True:
+                self._final_turn_formatted.set()
 
     async def _receive_messages(self) -> None:
         assert self._connection is not None
@@ -220,28 +281,22 @@ class AssemblyAIStreamingSession:
                     message = json.loads(text)
                 except ValueError:
                     continue
+                if not isinstance(message, dict):
+                    continue
                 message_type = str(message.get("type", "")).lower()
                 if message_type == "begin":
                     if self._session_began is not None and not self._session_began.done():
                         self._session_began.set_result(None)
                 elif message_type == "turn":
-                    completed_turn = self._tracker.handle_turn(message)
-                    full_transcript = self._tracker.full_transcript()
-                    if full_transcript and self._on_transcript_update is not None:
-                        self._on_transcript_update(full_transcript)
-                    if completed_turn and self._awaiting_final_transcript:
-                        self._final_turn_ended.set()
-                        if message.get("turn_is_formatted") is True:
-                            self._final_turn_formatted.set()
+                    self._handle_turn_message(message)
                 elif message_type == "termination":
                     self._terminated.set()
                     self._final_turn_ended.set()
                     self._final_turn_formatted.set()
-                elif message_type == "error":
+                elif message_type == "error" or "error" in message:
                     self._fail(str(message.get("error") or message.get("message") or "AssemblyAI error"))
         except websockets.ConnectionClosed as closed_error:
-            if self._session_began is not None and not self._session_began.done():
-                self._fail(f"AssemblyAI closed the connection: {closed_error}")
+            self._record_unexpected_close(closed_error)
         finally:
             self._terminated.set()
             self._final_turn_ended.set()

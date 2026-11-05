@@ -183,3 +183,134 @@ async def test_cancel_closes_without_error():
         await session.cancel()
         await session.cancel()  # idempotent
         await session.send_audio(b"\x00\x00")  # ignored after cancel
+
+
+# ---------- review fixes: cancellation, server close errors, late formatted turns ----------
+
+
+async def test_cancel_while_waiting_for_begin_closes_the_connection():
+    server_saw_close = asyncio.Event()
+
+    async def silent_handler(connection) -> None:  # never sends Begin
+        await connection.wait_closed()
+        server_saw_close.set()
+
+    async with websockets.serve(silent_handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        session = AssemblyAIStreamingSession(websocket_url=f"ws://127.0.0.1:{port}/v3/ws", open_timeout=10)
+        open_task = asyncio.create_task(session.open())
+        await asyncio.sleep(0.3)
+        open_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await open_task
+        await asyncio.wait_for(server_saw_close.wait(), timeout=2)
+
+
+async def test_server_close_after_begin_is_reported_not_swallowed():
+    async def closing_handler(connection) -> None:
+        await connection.send(json.dumps({"type": "Begin"}))
+        await connection.recv()  # first audio frame
+        await connection.close(code=3005, reason="Too many concurrent sessions")
+
+    async with websockets.serve(closing_handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        session = AssemblyAIStreamingSession(websocket_url=f"ws://127.0.0.1:{port}/v3/ws")
+        await session.open()
+        await session.send_audio(b"\x00\x00" * 800)
+        await asyncio.sleep(0.2)
+        await session.send_audio(b"\x00\x00" * 800)
+        with pytest.raises(TranscriptionError, match="Too many concurrent sessions"):
+            await session.finish(timeout=0.5)
+
+
+async def test_error_key_without_type_is_treated_as_error():
+    async def handler(connection) -> None:
+        await connection.send(json.dumps({"error": "Invalid token"}))
+        await connection.wait_closed()
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        session = AssemblyAIStreamingSession(websocket_url=f"ws://127.0.0.1:{port}/v3/ws", open_timeout=2)
+        with pytest.raises(TranscriptionError, match="Invalid token"):
+            await session.open()
+
+
+async def test_late_formatted_earlier_turn_does_not_cut_off_the_last_turn():
+    async def handler(connection) -> None:
+        await connection.send(json.dumps({"type": "Begin"}))
+        async for message in connection:
+            if isinstance(message, bytes):
+                await connection.send(
+                    json.dumps({"type": "Turn", "turn_order": 0, "transcript": "first sentence", "end_of_turn": True})
+                )
+                await connection.send(
+                    json.dumps({"type": "Turn", "turn_order": 1, "transcript": "second part", "end_of_turn": False})
+                )
+                continue
+            message_type = json.loads(message)["type"]
+            if message_type == "ForceEndpoint":
+                await connection.send(
+                    json.dumps(
+                        {
+                            "type": "Turn",
+                            "turn_order": 0,
+                            "transcript": "First sentence.",
+                            "end_of_turn": True,
+                            "turn_is_formatted": True,
+                        }
+                    )
+                )
+                await asyncio.sleep(0.15)
+                await connection.send(
+                    json.dumps(
+                        {
+                            "type": "Turn",
+                            "turn_order": 1,
+                            "transcript": "Second part?",
+                            "end_of_turn": True,
+                            "turn_is_formatted": True,
+                        }
+                    )
+                )
+            elif message_type == "Terminate":
+                await connection.send(json.dumps({"type": "Termination"}))
+                return
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        session = AssemblyAIStreamingSession(websocket_url=f"ws://127.0.0.1:{port}/v3/ws")
+        await session.open()
+        await session.send_audio(b"\x00\x00" * 800)
+        await asyncio.sleep(0.2)
+        assert await session.finish() == "First sentence. Second part?"
+
+
+async def test_finish_returns_quickly_when_no_turn_is_in_progress():
+    async def handler(connection) -> None:
+        await connection.send(json.dumps({"type": "Begin"}))
+        async for message in connection:
+            if isinstance(message, bytes):
+                await connection.send(
+                    json.dumps(
+                        {
+                            "type": "Turn",
+                            "turn_order": 0,
+                            "transcript": "Hello there.",
+                            "end_of_turn": True,
+                            "turn_is_formatted": True,
+                        }
+                    )
+                )
+            elif json.loads(message)["type"] == "Terminate":
+                await connection.send(json.dumps({"type": "Termination"}))
+                return
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        session = AssemblyAIStreamingSession(websocket_url=f"ws://127.0.0.1:{port}/v3/ws")
+        await session.open()
+        await session.send_audio(b"\x00\x00" * 800)
+        await asyncio.sleep(0.2)
+        started = asyncio.get_running_loop().time()
+        assert await session.finish(timeout=2.5) == "Hello there."
+        assert asyncio.get_running_loop().time() - started < 1.0

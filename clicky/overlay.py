@@ -41,6 +41,7 @@ BUBBLE_LINGER_SECONDS = 6.0
 NOTICE_LINGER_SECONDS = 5.0
 IDLE_FADE_DELAY_SECONDS = 1.0
 FRAME_INTERVAL_MS = 16
+HIDDEN_IDLE_INTERVAL_MS = 120
 BUBBLE_MAX_TEXT_WIDTH = 300.0
 
 BUDDY_BLUE = QColor(59, 130, 246)
@@ -113,14 +114,23 @@ class BuddyOverlay(QWidget):
         self._flip_horizontal = False
         self._flip_vertical = False
 
+        self._last_painted_signature: tuple | None = None
+
+        # Coarse, not Precise: on Windows a precise sub-20 ms timer raises the system-wide timer resolution
+        # (battery drain). While hidden and idle the timer also slows down; any public call wakes it.
         self._frame_timer = QTimer(self)
-        self._frame_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._frame_timer.setTimerType(Qt.TimerType.CoarseTimer)
         self._frame_timer.timeout.connect(self._tick)
         self._frame_timer.start(FRAME_INTERVAL_MS)
+
+    def _wake(self) -> None:
+        if self._frame_timer.interval() != FRAME_INTERVAL_MS:
+            self._frame_timer.setInterval(FRAME_INTERVAL_MS)
 
     # ----- public API (GUI thread) -----
 
     def set_state(self, state: str) -> None:
+        self._wake()
         previous_state, self.companion_state = self.companion_state, state
         now = time.monotonic()
         if state == "idle":
@@ -143,21 +153,26 @@ class BuddyOverlay(QWidget):
 
     def show_transcript(self, text: str) -> None:
         if text and self.companion_state in ("listening", "processing"):
+            self._wake()
             self._bubble = _Bubble(text, "transcript", None)
 
     def show_reply(self, text: str) -> None:
         if text:
+            self._wake()
             expires_at = None if self.companion_state != "idle" else time.monotonic() + BUBBLE_LINGER_SECONDS
             self._bubble = _Bubble(text, "reply", expires_at)
 
     def show_notice(self, text: str) -> None:
         if text:
+            self._wake()
             self._bubble = _Bubble(text, "notice", time.monotonic() + NOTICE_LINGER_SECONDS)
 
     def set_always_visible(self, always_visible: bool) -> None:
+        self._wake()
         self.always_visible = always_visible
 
     def fly_to(self, global_x: int, global_y: int, label: str = "") -> None:
+        self._wake()
         now = time.monotonic()
         self._flight = Flight(self._buddy_position, (float(global_x), float(global_y)), now)
         self._mode = "flying"
@@ -216,6 +231,8 @@ class BuddyOverlay(QWidget):
         if self._opacity <= 0.0:
             if self.isVisible():
                 self.hide()
+            if target_opacity == 0.0 and self._frame_timer.interval() != HIDDEN_IDLE_INTERVAL_MS:
+                self._frame_timer.setInterval(HIDDEN_IDLE_INTERVAL_MS)
             return
         if not self.isVisible():
             self.show()
@@ -225,7 +242,21 @@ class BuddyOverlay(QWidget):
                     logger.warning("Couldn't exclude the buddy from screen capture; it may appear in screenshots")
 
         self._position_window()
-        self.update()
+        # Moving a layered window keeps its pixels, so only repaint when what's drawn actually changes.
+        is_animating = self.companion_state in ("listening", "processing") or self._mode in ("flying", "returning")
+        bubble = self._bubble
+        paint_signature = (
+            round(self._opacity, 2),
+            self.companion_state,
+            self._mode,
+            self._point_label,
+            self._flip_horizontal,
+            self._flip_vertical,
+            (bubble.text, bubble.kind) if bubble is not None else None,
+        )
+        if is_animating or paint_signature != self._last_painted_signature:
+            self._last_painted_signature = paint_signature
+            self.update()
 
     def _position_window(self) -> None:
         buddy_x, buddy_y = self._buddy_position

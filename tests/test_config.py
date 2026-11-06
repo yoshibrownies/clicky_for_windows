@@ -23,14 +23,14 @@ def test_reads_values_and_strips_trailing_slash():
 
 def test_defaults():
     settings = load_settings({"CLICKY_WORKER_URL": "http://localhost:8787"})
-    assert settings.hotkey == "ctrl+alt"
+    assert settings.hotkey == "win+alt"
     assert settings.model == "claude-opus-5-5"
     assert settings.effort == "medium"
 
 
 def test_blank_values_fall_back_to_defaults():
     settings = load_settings({"CLICKY_WORKER_URL": "http://localhost:8787", "CLICKY_HOTKEY": "  "})
-    assert settings.hotkey == "ctrl+alt"
+    assert settings.hotkey == "win+alt"
 
 
 @pytest.mark.parametrize("bad_url", [None, "", "   ", "clicky-proxy.workers.dev", "ftp://x.dev"])

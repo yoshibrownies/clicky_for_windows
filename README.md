@@ -1,6 +1,6 @@
 # Clicky for Windows
 
-An AI buddy that lives next to your cursor. Hold **Ctrl + Alt** and ask something. Clicky hears you,
+An AI buddy that lives next to your cursor. Hold **Win + Alt** and ask something. Clicky hears you,
 looks at your screens, answers out loud, and a little blue triangle flies over to point at the thing
 it's talking about.
 
@@ -8,7 +8,7 @@ A Windows port of [Clicky for macOS](https://github.com/farzaa/clicky) by Farza 
 Python + Qt. It uses the original Cloudflare Worker (plus an optional OpenAI route), so your API keys never live on your PC or in this repo.
 
 ```
-hold Ctrl+Alt ─▶ mic ─▶ AssemblyAI (live transcript)
+hold Win+Alt ─▶ mic ─▶ AssemblyAI (live transcript)
 release       ─▶ screenshot every monitor ─▶ Claude (streamed) ─▶ ElevenLabs voice
                                               └─▶ [POINT:x,y:label] ─▶ buddy flies there
 ```
@@ -53,7 +53,7 @@ Double-click **`Clicky.bat`** (no console window), or for logs in a terminal:
 ```bash
 .venv\Scripts\python -m clicky
 ```
-A blue triangle appears in the system tray (it may be in the ^ overflow). Hold **Ctrl + Alt**, talk,
+A blue triangle appears in the system tray (it may be in the ^ overflow). Hold **Win + Alt**, talk,
 release.
 
 **Start with Windows:** press Win + R, type `shell:startup`, and put a shortcut to `Clicky.bat` in that folder.
@@ -78,17 +78,17 @@ Everything else is click-through and stays out of Clicky's own screenshots.
 ## Using it
 | You do | Clicky does |
 |---|---|
-| Hold Ctrl + Alt | Starts listening (green waveform). It waits 0.15 s so quick shortcuts don't trigger it |
-| Press another key while holding | Cancels, so Ctrl+Alt+Del, Ctrl+Alt+T and AltGr typing are safe |
+| Hold Win + Alt | Starts listening (green waveform). It waits 0.15 s so quick shortcuts don't trigger it |
+| Press another key while holding | Cancels, so Win+Alt shortcuts (like Game Bar recording) still work |
 | Release | Takes screenshots, thinks (purple spinner), then talks and points |
-| Hold Ctrl + Alt while it's talking | Interrupts it and listens again |
+| Hold Win + Alt while it's talking | Interrupts it and listens again |
 | Right-click tray icon | Switch model (Claude Opus/Sonnet 5.5, GPT-6.1 Terra/Sol, GPT-6 Luna), Thinking (Fast / Balanced / Deep), Show lesson card, hide the buddy when idle, forget the conversation, quit |
 
 Settings in `.env`:
 | Variable | Default | Notes |
 |---|---|---|
 | `CLICKY_WORKER_URL` | (required) | Your Worker URL |
-| `CLICKY_HOTKEY` | `ctrl+alt` | e.g. `right_ctrl`, `ctrl+win`, `f13`. Names: ctrl, alt, shift, win, left_/right_ variants, f13 to f24 |
+| `CLICKY_HOTKEY` | `win+alt` | e.g. `right_ctrl`, `ctrl+win`, `f13`. Names: ctrl, alt, shift, win, left_/right_ variants, f13 to f24 |
 | `CLICKY_MODEL` | `claude-opus-5-5` | `claude-sonnet-5-5` (half the price), or OpenAI `gpt-6.1-terra` / `gpt-6-luna` (needs the `OPENAI_API_KEY` secret). Any `gpt-*` model goes to OpenAI |
 | `CLICKY_EFFORT` | `medium` | `low` replies fastest; `high` thinks longest (slower, pricier). Also the tray's Thinking menu |
 

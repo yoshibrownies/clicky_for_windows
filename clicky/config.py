@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-DEFAULT_HOTKEY = "ctrl+alt"
+DEFAULT_HOTKEY = "win+alt"
 DEFAULT_MODEL = "claude-opus-5-5"
 DEFAULT_EFFORT = "medium"
 # Tray "Thinking" menu labels. Same names work for Claude (output_config.effort) and OpenAI (reasoning_effort).

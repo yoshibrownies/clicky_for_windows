@@ -163,3 +163,12 @@ def test_tap_detector_ignores_a_key_already_held_at_start():
     assert detector.update(True) is False
     assert detector.update(False) is False
     assert detector.update(True) is True
+
+
+def test_win_alt_default_parses_and_reads_nicely(qt_app):
+    from clicky.config import DEFAULT_HOTKEY
+    from clicky.hotkey import parse_hotkey
+
+    assert DEFAULT_HOTKEY == "win+alt"
+    parsed = parse_hotkey(DEFAULT_HOTKEY)
+    assert parsed.watched_keys  # the Windows keys and both Alt keys are watched

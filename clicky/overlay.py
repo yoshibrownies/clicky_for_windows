@@ -109,6 +109,8 @@ class BuddyOverlay(QWidget):
         self._flight: Flight | None = None
         self._hold_until = 0.0
         self._point_label = ""
+        # While the lesson card writes, the buddy follows the pen instead of the mouse ("cursor follows thought").
+        self._guide_target: tuple[float, float] | None = None
         self._idle_since = time.monotonic()
         self._opacity = 0.0
         self._flip_horizontal = False
@@ -192,7 +194,27 @@ class BuddyOverlay(QWidget):
 
     # ----- animation -----
 
+    @property
+    def is_guided(self) -> bool:
+        return self._guide_target is not None
+
+    def guide_to(self, global_x: int, global_y: int) -> None:
+        """Follow this point (the card's pen) instead of the mouse. A POINT flight in progress takes priority."""
+        self._wake()
+        self._guide_target = (float(global_x), float(global_y))
+
+    def release_guide(self) -> None:
+        """Stop following the pen and glide back to the mouse."""
+        if self._guide_target is None:
+            return
+        self._guide_target = None
+        if self._mode == "follow":
+            self._start_return_flight(time.monotonic())
+
     def _follow_target(self) -> tuple[float, float]:
+        if self._guide_target is not None:
+            # Sit just below-right of the pen so the triangle's tip points at the writing.
+            return self._guide_target[0] + 6.0, self._guide_target[1] + 6.0
         cursor_position = QCursor.pos()
         return cursor_position.x() + FOLLOW_OFFSET[0], cursor_position.y() + FOLLOW_OFFSET[1]
 
@@ -204,7 +226,7 @@ class BuddyOverlay(QWidget):
     def _is_wanted_visible(self, now: float) -> bool:
         if self._bubble is not None and (self._bubble.expires_at is None or now < self._bubble.expires_at):
             return True
-        if self._mode != "follow":
+        if self._mode != "follow" or self._guide_target is not None:
             return True
         if self.companion_state != "idle":
             return True
@@ -272,7 +294,9 @@ class BuddyOverlay(QWidget):
 
     def _position_window(self) -> None:
         buddy_x, buddy_y = self._buddy_position
-        screen = QGuiApplication.screenAt(QCursor.pos()) if self._mode == "follow" else None
+        screen = (
+            QGuiApplication.screenAt(QCursor.pos()) if self._mode == "follow" and self._guide_target is None else None
+        )
         if screen is None:
             from PySide6.QtCore import QPoint
 

@@ -231,3 +231,33 @@ def test_clear_all_reaches_every_visual_and_reports_visibility(qt_app):
     assert calls == ["director", "layer", "notepad", "whiteboard", "overlay"]
     notepad.visible = False
     assert not something_visible()
+
+
+def test_overlay_guide_mode_follows_the_pen_then_returns(qt_app):
+    from clicky.overlay import BuddyOverlay
+
+    overlay = BuddyOverlay()
+    try:
+        overlay.guide_to(700, 420)
+        pump(0.5)
+        x, y = overlay._buddy_position
+        assert abs(x - 700) < 25 and abs(y - 420) < 25
+        assert overlay.is_guided
+        overlay.release_guide()
+        assert not overlay.is_guided
+        assert overlay._mode == "returning"
+    finally:
+        overlay.close()
+
+
+def test_explicit_point_wins_over_guiding(qt_app):
+    from clicky.overlay import BuddyOverlay
+
+    overlay = BuddyOverlay()
+    try:
+        overlay.guide_to(100, 100)
+        overlay.fly_to(900, 500, "button")
+        overlay.guide_to(120, 110)  # the pen keeps moving, but the point flight continues
+        assert overlay._mode in ("flying", "holding")
+    finally:
+        overlay.close()

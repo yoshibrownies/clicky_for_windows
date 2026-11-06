@@ -131,3 +131,71 @@ def test_remembered_spot_is_kept_on_a_screen(qt_app):
         assert available.intersects(QRect(card.pos(), card.size()))
     finally:
         card.close()
+
+
+def overlaps(card: LessonCard, rect: QRect) -> bool:
+    return QRect(card.pos(), card.size()).intersects(rect)
+
+
+def test_card_glides_out_of_the_way_of_a_mark_under_it(qt_app):
+    card = make_card()
+    try:
+        card.add_note("hello")
+        # Clicky underlined something under the card (right half: the 800 px test screen's left dock is clear)
+        mark = QRect(card.x() + 220, card.y() + 60, 120, 24)
+        assert overlaps(card, mark)
+        card.avoid(mark)
+        pump(0.5)
+        assert not overlaps(card, mark)
+        assert card.isVisible()
+    finally:
+        card.close()
+
+
+def test_a_mark_elsewhere_does_not_move_the_card(qt_app):
+    card = make_card()
+    try:
+        card.add_note("hello")
+        start = card.pos()
+        card.avoid(QRect(10, 700, 100, 20))
+        pump(0.4)
+        assert card.pos() == start
+    finally:
+        card.close()
+
+
+def test_a_new_card_docks_away_from_marks_already_on_screen(qt_app):
+    available = QApplication.primaryScreen().availableGeometry()
+    card = make_card()
+    try:
+        mark = QRect(available.right() - 120, available.top() + 100, 100, 24)  # where the card usually docks
+        card.avoid(mark)
+        card.add_note("hello")
+        assert not overlaps(card, mark)
+    finally:
+        card.close()
+
+
+def test_expired_marks_are_forgotten(qt_app):
+    available = QApplication.primaryScreen().availableGeometry()
+    card = make_card()
+    try:
+        mark = QRect(available.right() - 120, available.top() + 100, 100, 24)
+        card.avoid(mark, seconds=0.05)
+        pump(0.1)
+        card.add_note("hello")
+        assert overlaps(card, mark)  # the mark is gone, so the usual top-right spot is fine
+    finally:
+        card.close()
+
+
+def test_a_mark_under_a_spot_you_dragged_it_to_still_wins(qt_app):
+    card = make_card()
+    try:
+        card.add_note("hello")
+        card._user_position = card.pos()
+        card.avoid(QRect(card.x() + 220, card.y() + 60, 120, 24))
+        pump(0.5)
+        assert card.pos() != card._user_position
+    finally:
+        card.close()

@@ -122,17 +122,6 @@ def build_clear_controls(director, annotation_layer, card, chips, overlay):
     return clear_all, something_visible
 
 
-def mark_covers_card(box: tuple[int, int, int, int], card_rect: QRect) -> bool:
-    """True when a screen mark's box (left, top, right, bottom, global) overlaps the lesson card."""
-    left, top, right, bottom = box
-    return QRect(QPoint(left, top), QPoint(right, bottom)).intersects(card_rect)
-
-
-def card_area(card) -> QRect | None:
-    """The lesson card's rectangle while it is on screen, else None (nothing to protect)."""
-    return card.geometry() if card.isVisible() else None
-
-
 def chips_anchor(card) -> QRect:
     """Where follow-up chips go: under the lesson card, or where the card would sit when there isn't one."""
     if card.isVisible():
@@ -230,12 +219,11 @@ def main() -> int:
         }[kind](text)
 
     def add_mark(event) -> None:
-        area = card_area(card)
-        if event.box is not None and area is not None and mark_covers_card(event.box, area):
-            # Clicky can't see its own card (it's hidden from screenshots), so a mark there is a guess: drop it.
-            logger.info("Dropped a %s that overlapped the lesson card", event.kind)
-            return
         annotation_layer.add_mark(event)
+        if event.box is not None:
+            # Clicky can't see its card, so it may mark something underneath: the card moves out of the way.
+            left, top, right, bottom = event.box
+            card.avoid(QRect(QPoint(left, top), QPoint(right, bottom)).normalized())
         overlay.raise_()
 
     def point_at_event(event) -> None:

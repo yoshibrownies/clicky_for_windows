@@ -15,7 +15,7 @@ import math
 import time
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QCursor,
@@ -66,6 +66,9 @@ IDLE_CHECK_INTERVAL_MS = 200
 WRITING_POINT_INTERVAL_SECONDS = 1 / 30
 CLOSE_BUTTON_SIZE = 24
 WHEEL_PIXELS_PER_NOTCH = 40
+MARK_AVOID_SECONDS = 12.0  # about as long as an underline or circle stays on screen
+GLIDE_MS = 260
+DOCK_MARGIN = 16
 
 PAPER_COLOR = QColor(238, 243, 238)
 TITLE_BAR_COLOR = QColor(213, 224, 214)
@@ -138,6 +141,10 @@ class LessonCard(QWidget):
         self._drag_offset: QPoint | None = None
         self._user_scroll = 0.0  # pixels scrolled back up with the wheel; 0 = follow the newest line
         self._close_hovered = False
+        self._marks: list[tuple[QRect, float]] = []  # screen marks to keep clear of: (global rect, expires at)
+        self._glide = QPropertyAnimation(self, b"pos", self)
+        self._glide.setDuration(GLIDE_MS)
+        self._glide.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.setWindowTitle("Clicky's lesson card")
         self._linger_seconds = linger_seconds
         self._fade_seconds = fade_seconds
@@ -229,6 +236,61 @@ class LessonCard(QWidget):
                 scene=scene,
             )
         )
+
+    def avoid(self, rect: QRect, seconds: float = MARK_AVOID_SECONDS) -> None:
+        """A mark was drawn on screen at `rect` (global). Keep the card off it so you can see what Clicky means."""
+        self._marks.append((QRect(rect), time.monotonic() + seconds))
+        self._dodge_marks()
+
+    def _live_marks(self) -> list[QRect]:
+        now = time.monotonic()
+        self._marks = [(rect, expires) for rect, expires in self._marks if expires > now]
+        return [rect for rect, _ in self._marks]
+
+    def _overlap_with_marks(self, top_left: QPoint, marks: list[QRect]) -> int:
+        spot = QRect(top_left, self.size())
+        total = 0
+        for mark in marks:
+            shared = spot.intersected(mark)
+            if not shared.isEmpty():
+                total += max(1, shared.width() * shared.height())
+        return total
+
+    def _dock_spots(self, screen) -> list[QPoint]:
+        """Where a card can dock on this screen: top right (usual), then top left."""
+        available = screen.availableGeometry()
+        top = available.top() + DOCK_TOP_MARGIN
+        return [
+            QPoint(available.right() - self.width() - DOCK_MARGIN, top),
+            QPoint(available.left() + DOCK_MARGIN, top),
+        ]
+
+    def _clear_spot(self, preferred: QPoint, screen) -> QPoint:
+        """`preferred` if no live mark is under it, else the dock spot with the least mark under it."""
+        marks = self._live_marks()
+        if not marks or self._overlap_with_marks(preferred, marks) == 0:
+            return preferred
+        spots = self._dock_spots(screen)
+        return min(spots, key=lambda spot: (self._overlap_with_marks(spot, marks), spot != preferred))
+
+    def _dodge_marks(self) -> None:
+        """If the visible card covers a live mark, glide to a spot that doesn't."""
+        if not self.isVisible() or not self._blocks:
+            return
+        marks = self._live_marks()
+        here = self._glide.endValue() if self._glide.state() == QPropertyAnimation.State.Running else self.pos()
+        if not marks or self._overlap_with_marks(here, marks) == 0:
+            return
+        screen = QGuiApplication.screenAt(QRect(here, self.size()).center()) or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        target = self._clear_spot(here, screen)
+        if target == here:
+            return
+        self._glide.stop()
+        self._glide.setStartValue(self.pos())
+        self._glide.setEndValue(target)
+        self._glide.start()
 
     @property
     def highlighted_label(self) -> str | None:
@@ -324,6 +386,7 @@ class LessonCard(QWidget):
         height = self._content_height()
         if height > self.height():
             self.resize(self.width(), height)
+            self._dodge_marks()  # a taller card may now cover a mark
         if not was_visible:
             self.show()
             if not self._capture_exclusion_applied:
@@ -340,14 +403,13 @@ class LessonCard(QWidget):
                 available = screen.availableGeometry()
                 x = max(available.left(), min(spot.left(), available.right() - self.width()))
                 y = max(available.top(), min(spot.top(), available.bottom() - 120))
-                self.move(x, y)
+                self.move(self._clear_spot(QPoint(x, y), screen))
                 return
             self._user_position = None  # that screen is gone: dock normally
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         if screen is None:
             return
-        available = screen.availableGeometry()
-        self.move(available.right() - self.width() - 16, available.top() + DOCK_TOP_MARGIN)
+        self.move(self._clear_spot(self._dock_spots(screen)[0], screen))
 
     def _blocks_height(self) -> float:
         if not self._blocks:

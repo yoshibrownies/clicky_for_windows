@@ -2,7 +2,7 @@ import json
 import math
 import time
 
-from PySide6.QtCore import QRect, QRectF
+from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QImage, QPainter
 
 from clicky.scene import parse_scene
@@ -81,14 +81,6 @@ def test_card_highlight_targets_the_animation_and_keeps_animating(qt_app):
         card.close()
 
 
-def test_screen_marks_over_the_card_are_dropped(qt_app):
-    from clicky.app import mark_covers_card
-
-    card_rect = QRect(1000, 56, 444, 600)
-    assert mark_covers_card((950, 300, 1100, 340), card_rect)  # half on the card, half on the desktop
-    assert not mark_covers_card((100, 300, 300, 340), card_rect)
-
-
 def test_pen_goes_to_the_ring_even_while_a_note_is_typing(qt_app):
     from clicky.lesson_card import LessonCard
 
@@ -144,13 +136,3 @@ def test_ring_hugs_tall_objects_and_stays_inside_the_panel(qt_app):
         painter.end()
     ring = scene_painter.highlight_rect
     assert ring.width() < ring.height() / 2
-
-
-def test_marks_are_only_dropped_over_a_card_that_is_actually_up(qt_app):
-    from clicky.app import card_area
-
-    class HiddenCard:
-        def isVisible(self):  # noqa: N802 (mirrors Qt)
-            return False
-
-    assert card_area(HiddenCard()) is None  # no card on screen: nothing to protect, keep every mark

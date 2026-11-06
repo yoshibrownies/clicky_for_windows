@@ -301,6 +301,12 @@ def main() -> int:
 
     card.writing_point.connect(follow_pen)
     card.faded.connect(chips.hide_options)
+
+    def chips_follow_card() -> None:
+        if chips.isVisible() and card.isVisible():
+            chips.show_options(chips.options(), below=card.geometry())
+
+    card.moved.connect(chips_follow_card)
     # Every Clicky window is always-on-top, and Windows stacks the newest one highest: lift the buddy back above
     # the card, the chips and fresh marks so it is never drawn behind them.
     card.appeared.connect(overlay.raise_)

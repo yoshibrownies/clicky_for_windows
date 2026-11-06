@@ -4,6 +4,8 @@ A title bar, then blocks in the order the model wrote them: a big handwritten he
 boxes-and-arrows diagram and an inline animation. Text types out, diagrams pop in box by box, animations play.
 `writing_point` reports where the "pen" is so the buddy cursor can follow it. Click-through, always on top,
 excluded from screen capture; it lingers after the reply, then fades. The timer runs only while something moves.
+You can drag it by its title bar, close it with the x, and scroll it with the mouse wheel; it never takes keyboard
+focus, so the app you're working in keeps it.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ import math
 import time
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QCursor,
@@ -62,6 +64,8 @@ CLEAR_FADE_SECONDS = 0.2
 FRAME_INTERVAL_MS = 16
 IDLE_CHECK_INTERVAL_MS = 200
 WRITING_POINT_INTERVAL_SECONDS = 1 / 30
+CLOSE_BUTTON_SIZE = 24
+WHEEL_PIXELS_PER_NOTCH = 40
 
 PAPER_COLOR = QColor(238, 243, 238)
 TITLE_BAR_COLOR = QColor(213, 224, 214)
@@ -109,6 +113,7 @@ class LessonCard(QWidget):
     writing_point = Signal(object)  # QPoint, global: where the pen is right now
     faded = Signal()  # the card went away (faded out or cleared)
     appeared = Signal()  # a new card just came up (the buddy is raised above it)
+    moved = Signal()  # the card's window moved (dragged, or glided out of a mark's way)
 
     def __init__(
         self,
@@ -122,13 +127,17 @@ class LessonCard(QWidget):
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
-            | Qt.WindowType.WindowTransparentForInput
             | Qt.WindowType.WindowDoesNotAcceptFocus
             | Qt.WindowType.NoDropShadowWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setMouseTracking(True)
+        self._user_position: QPoint | None = None  # where Yoshi last dropped the card (this session only)
+        self._drag_offset: QPoint | None = None
+        self._user_scroll = 0.0  # pixels scrolled back up with the wheel; 0 = follow the newest line
+        self._close_hovered = False
         self.setWindowTitle("Clicky's lesson card")
         self._linger_seconds = linger_seconds
         self._fade_seconds = fade_seconds
@@ -266,7 +275,21 @@ class LessonCard(QWidget):
             return 0.0
         written = sum(block.height for block in started) + BLOCK_GAP * (len(started) - 1)
         inner_visible = self.height() - 2 * SHADOW - TITLE_BAR_HEIGHT - PADDING_TOP - PADDING_BOTTOM
-        return max(0.0, written - inner_visible)
+        bottom = max(0.0, written - inner_visible)
+        return max(0.0, bottom - self._user_scroll)
+
+    def close_button_rect(self) -> QRectF:
+        paper = self._paper_rect()
+        return QRectF(
+            paper.right() - CLOSE_BUTTON_SIZE - 10,
+            paper.top() + (TITLE_BAR_HEIGHT - CLOSE_BUTTON_SIZE) / 2,
+            CLOSE_BUTTON_SIZE,
+            CLOSE_BUTTON_SIZE,
+        )
+
+    def _title_bar_rect(self) -> QRectF:
+        paper = self._paper_rect()
+        return QRectF(paper.left(), paper.top(), paper.width(), TITLE_BAR_HEIGHT)
 
     # ----- building -----
 
@@ -294,6 +317,7 @@ class LessonCard(QWidget):
             block.starts_at = time.monotonic()
         self._blocks.append(block)
         self._fade_at = None
+        self._user_scroll = 0.0
         was_visible = self.isVisible()
         if not was_visible:
             self._dock()
@@ -309,6 +333,16 @@ class LessonCard(QWidget):
         self.update()
 
     def _dock(self) -> None:
+        if self._user_position is not None:
+            spot = QRect(self._user_position, self.size())
+            screen = QGuiApplication.screenAt(spot.center())
+            if screen is not None:
+                available = screen.availableGeometry()
+                x = max(available.left(), min(spot.left(), available.right() - self.width()))
+                y = max(available.top(), min(spot.top(), available.bottom() - 120))
+                self.move(x, y)
+                return
+            self._user_position = None  # that screen is gone: dock normally
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         if screen is None:
             return
@@ -344,6 +378,8 @@ class LessonCard(QWidget):
     def _reset(self) -> None:
         had_content = bool(self._blocks)
         self._blocks = []
+        self._user_scroll = 0.0
+        self._drag_offset = None
         self._highlight = None
         self._title = DEFAULT_TITLE
         self._fade_at = None
@@ -455,6 +491,66 @@ class LessonCard(QWidget):
         paper = self._paper_rect()
         return QRectF(paper.left() + PADDING_X - 10, top, paper.width() - 2 * PADDING_X + 20, ANIMATION_BLOCK_HEIGHT)
 
+    # ----- mouse: drag by the title bar, x to close, wheel to scroll -----
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        position = event.position()
+        if self.close_button_rect().contains(position):
+            return  # handled on release, so a press that slides off doesn't close
+        if self._title_bar_rect().contains(position):
+            self._drag_offset = event.globalPosition().toPoint() - self.pos()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        position = event.position()
+        if self._drag_offset is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            return
+        hovered = self.close_button_rect().contains(position)
+        if hovered != self._close_hovered:
+            self._close_hovered = hovered
+            self.update()
+        if hovered:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        elif self._title_bar_rect().contains(position):
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        else:
+            self.unsetCursor()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._drag_offset is not None:
+            self._drag_offset = None
+            self._user_position = self.pos()
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            return
+        if self.close_button_rect().contains(event.position()):
+            self.clear()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if self._close_hovered:
+            self._close_hovered = False
+            self.update()
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        notches = event.angleDelta().y() / 120
+        if not notches or not self._blocks:
+            return
+        now = time.monotonic()
+        previous_scroll = self._user_scroll
+        self._user_scroll = 0.0
+        bottom = self.scroll_offset(now)  # how far down the newest line is
+        self._user_scroll = max(0.0, min(bottom, previous_scroll + notches * WHEEL_PIXELS_PER_NOTCH))
+        self.update()
+        event.accept()
+
+    def moveEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().moveEvent(event)
+        self.moved.emit()
+
     # ----- painting -----
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
@@ -485,6 +581,7 @@ class LessonCard(QWidget):
             Qt.AlignmentFlag.AlignCenter,
             self._title,
         )
+        self._paint_close_button(painter)
 
         painter.save()
         painter.setClipRect(
@@ -504,6 +601,20 @@ class LessonCard(QWidget):
                 logger.exception("Painting a %s block failed", block.kind)
         painter.restore()
         painter.end()
+
+    def _paint_close_button(self, painter: QPainter) -> None:
+        button = self.close_button_rect()
+        painter.save()
+        if self._close_hovered:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 22))
+            painter.drawEllipse(button)
+        painter.setPen(QPen(TITLE_TEXT_COLOR, 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        inset = button.width() * 0.32
+        cross = button.adjusted(inset, inset, -inset, -inset)
+        painter.drawLine(cross.topLeft(), cross.bottomRight())
+        painter.drawLine(cross.topRight(), cross.bottomLeft())
+        painter.restore()
 
     def _paint_text(self, painter: QPainter, block: _Block, top: float, now: float) -> None:
         _, _, line_height, _ = TEXT_STYLES[block.kind]

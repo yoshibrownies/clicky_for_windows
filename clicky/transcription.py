@@ -153,6 +153,7 @@ class AssemblyAIStreamingSession:
         # True when audio went out after the last completed turn. AssemblyAI's partials lag the audio, so "no turn
         # in progress yet" does not mean "nothing left to transcribe".
         self._audio_sent_since_completed_turn = False
+        self._any_turn_received = False
 
     @property
     def latest_transcript(self) -> str:
@@ -182,7 +183,8 @@ class AssemblyAIStreamingSession:
         try:
             await self._connection.send(pcm16_audio)
             # The mic streams silence too while the key is held; only audible audio can still become words.
-            if compute_audio_level(pcm16_audio) >= SPEECH_LEVEL_THRESHOLD:
+            # Before any words have come back, any audio counts: a quiet mic must not lose a short question.
+            if not self._any_turn_received or compute_audio_level(pcm16_audio) >= SPEECH_LEVEL_THRESHOLD:
                 self._audio_sent_since_completed_turn = True
         except websockets.ConnectionClosed as closed_error:
             self._record_unexpected_close(closed_error)
@@ -276,6 +278,7 @@ class AssemblyAIStreamingSession:
 
     def _handle_turn_message(self, message: dict) -> None:
         completed_turn = self._tracker.handle_turn(message)
+        self._any_turn_received = True
         if completed_turn:
             self._audio_sent_since_completed_turn = False
         full_transcript = self._tracker.full_transcript()

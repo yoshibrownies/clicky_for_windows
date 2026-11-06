@@ -437,3 +437,34 @@ async def test_silence_after_a_finished_turn_does_not_add_a_wait():
         started = asyncio.get_running_loop().time()
         assert await session.finish(timeout=2.5) == "Hello there."
         assert asyncio.get_running_loop().time() - started < 1.0
+
+
+async def test_quiet_microphone_released_before_any_partial_still_gets_the_words():
+    async def lagging_handler(connection) -> None:
+        await connection.send(json.dumps({"type": "Begin"}))
+        async for message in connection:
+            if isinstance(message, bytes):
+                continue  # no partials yet
+            message_type = json.loads(message)["type"]
+            if message_type == "ForceEndpoint":
+                await connection.send(
+                    json.dumps(
+                        {
+                            "type": "Turn",
+                            "turn_order": 0,
+                            "transcript": "Quiet question?",
+                            "end_of_turn": True,
+                            "turn_is_formatted": True,
+                        }
+                    )
+                )
+            elif message_type == "Terminate":
+                await connection.send(json.dumps({"type": "Termination"}))
+                return
+
+    async with websockets.serve(lagging_handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        session = AssemblyAIStreamingSession(websocket_url=f"ws://127.0.0.1:{port}/v3/ws")
+        await session.open()
+        await session.send_audio(b"\x10\x00" * 800)  # very quiet speech (low mic gain)
+        assert await session.finish(timeout=2.5) == "Quiet question?"

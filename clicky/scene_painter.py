@@ -76,8 +76,19 @@ def _color(name: str, alpha: float = 1.0) -> QColor:
     return color
 
 
+HIGHLIGHT_SECONDS = 3.0
+HIGHLIGHT_GROW_SECONDS = 0.4
+HIGHLIGHT_FADE_SECONDS = 0.4
+HIGHLIGHT_PADDING = 9.0
+HIGHLIGHT_COLOR = QColor(229, 72, 77)
+
+
 class ScenePainter:
-    """Holds the fonts and paints scenes. `focus_point` is where the action is in the last frame painted."""
+    """Holds the fonts and paints scenes. `focus_point` is where the action is in the last frame painted.
+
+    A highlight (label, seconds since it began) rings the object with that label wherever it is in this frame, so
+    the ring follows moving objects. `highlight_rect` is the ring drawn in the last frame (None if none).
+    """
 
     def __init__(self) -> None:
         self._hand_font = ui_font(14, QFont.Weight.Medium)
@@ -85,10 +96,14 @@ class ScenePainter:
         self._tick_font = mono_font(10)
         self._label_font = ui_font(12, QFont.Weight.Medium)
         self.focus_point: QPointF | None = None
+        self.highlight_rect: QRectF | None = None
 
-    def paint(self, painter: QPainter, area: QRectF, scene: Scene, t: float) -> None:
+    def paint(
+        self, painter: QPainter, area: QRectF, scene: Scene, t: float, highlight: tuple[str, float] | None = None
+    ) -> None:
         self.focus_point = None
-        self._paint_scene(painter, area, scene, t)
+        self.highlight_rect = None
+        self._paint_scene(painter, area, scene, t, highlight)
 
     def _plot_rect(self, board: QRectF, scene: Scene) -> QRectF:
         left_margin = 58 if scene.axes else 20
@@ -102,7 +117,9 @@ class ScenePainter:
             board.height() - top_margin - bottom_margin,
         )
 
-    def _paint_scene(self, painter: QPainter, board: QRectF, scene: Scene, t: float) -> None:
+    def _paint_scene(
+        self, painter: QPainter, board: QRectF, scene: Scene, t: float, highlight: tuple[str, float] | None = None
+    ) -> None:
         plot = self._plot_rect(board, scene)
         mapper = WorldMapper(scene.world, (plot.left(), plot.top(), plot.width(), plot.height()))
 
@@ -117,11 +134,22 @@ class ScenePainter:
 
         self._paint_grid_and_axes(painter, plot, mapper, scene)
 
+        wanted = highlight[0].casefold().strip() if highlight is not None else ""
+        target: QRectF | None = None
         painter.save()
         painter.setClipRect(plot.adjusted(-6, -6, 6, 6))
         for item in scene.frame(t):
-            self._paint_item(painter, mapper, item)
+            bounds = self._paint_item(painter, mapper, item)
+            if (
+                wanted
+                and target is None
+                and bounds is not None
+                and wanted in (item.label.casefold(), item.text.casefold())
+            ):
+                target = bounds
         painter.restore()
+        if highlight is not None and target is not None:
+            self._paint_highlight(painter, target, highlight[1])
 
         caption = scene.caption_at(t)
         if caption is not None:
@@ -177,8 +205,28 @@ class ScenePainter:
             painter.drawText(QRectF(-plot.height() / 2, -10, plot.height(), 20), Qt.AlignmentFlag.AlignCenter, y_label)
             painter.restore()
 
-    def _paint_item(self, painter: QPainter, mapper: WorldMapper, item: DrawItem) -> None:
+    def _paint_highlight(self, painter: QPainter, target: QRectF, elapsed: float) -> None:
+        """A red ring that draws itself around the target, holds, then fades."""
+        if elapsed < 0 or elapsed >= HIGHLIGHT_SECONDS:
+            return
+        grow = min(1.0, elapsed / HIGHLIGHT_GROW_SECONDS)
+        fade = min(1.0, (HIGHLIGHT_SECONDS - elapsed) / HIGHLIGHT_FADE_SECONDS)
+        size = max(target.width(), target.height(), 14.0) + 2 * HIGHLIGHT_PADDING
+        ring = QRectF(target.center().x() - size / 2, target.center().y() - size / 2, size, size)
+        color = QColor(HIGHLIGHT_COLOR)
+        color.setAlphaF(fade)
+        painter.save()
+        painter.setPen(QPen(color, 3.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawArc(ring, 90 * 16, -int(360 * 16 * grow))
+        painter.restore()
+        self.highlight_rect = ring
+        self.focus_point = ring.center()
+
+    def _paint_item(self, painter: QPainter, mapper: WorldMapper, item: DrawItem) -> QRectF | None:
+        """Paint one object; returns its bounds on screen (for highlights), or None if it has none."""
         values = item.values
+        bounds: QRectF | None = None
         color = _color(item.color, item.alpha)
         pen = QPen(
             color,
@@ -202,6 +250,7 @@ class ScenePainter:
             painter.setBrush(color)
             painter.drawEllipse(center, radius, radius)
             label_anchor = QPointF(center.x() + radius + 4, center.y() - radius)
+            bounds = QRectF(center.x() - radius, center.y() - radius, 2 * radius, 2 * radius)
             if self.focus_point is None:
                 self.focus_point = QPointF(center)
         elif item.kind == "rect":
@@ -214,16 +263,18 @@ class ScenePainter:
             painter.setBrush(fill)
             painter.drawRoundedRect(rect, 4, 4)
             label_anchor = QPointF(rect.left(), rect.top() - 6)
+            bounds = rect
         elif item.kind == "line":
+            line_start = QPointF(*mapper.to_pixel(values["x1"], values["y1"]))
+            line_end = QPointF(*mapper.to_pixel(values["x2"], values["y2"]))
             painter.setPen(pen)
-            painter.drawLine(
-                QPointF(*mapper.to_pixel(values["x1"], values["y1"])),
-                QPointF(*mapper.to_pixel(values["x2"], values["y2"])),
-            )
+            painter.drawLine(line_start, line_end)
+            bounds = QRectF(line_start, line_end).normalized()
         elif item.kind == "arrow":
             start = QPointF(*mapper.to_pixel(values["x"], values["y"]))
             vector_x, vector_y = mapper.vector_to_pixel(values["dx"], values["dy"])
             end = QPointF(start.x() + vector_x, start.y() + vector_y)
+            bounds = QRectF(start, end).normalized()
             painter.setPen(pen)
             painter.drawLine(start, end)
             length = math.hypot(vector_x, vector_y)
@@ -242,7 +293,10 @@ class ScenePainter:
             font = ui_font(int(max(9, min(40, values.get("size", 14)))), QFont.Weight.Medium)
             painter.setFont(font)
             painter.setPen(color)
-            painter.drawText(QPointF(*mapper.to_pixel(values["x"], values["y"])), item.text)
+            baseline = QPointF(*mapper.to_pixel(values["x"], values["y"]))
+            painter.drawText(baseline, item.text)
+            text_rect = QFontMetricsF(font).boundingRect(item.text)
+            bounds = text_rect.translated(baseline)
         elif item.kind == "plot":
             painter.setPen(
                 QPen(
@@ -257,6 +311,7 @@ class ScenePainter:
             for segment in item.segments:
                 painter.drawPolyline(QPolygonF([QPointF(*mapper.to_pixel(x, y)) for x, y in segment]))
                 label_anchor = QPointF(*mapper.to_pixel(*segment[-1]))
+                bounds = QRectF(label_anchor.x() - 6, label_anchor.y() - 6, 12, 12)  # the plot's moving head
                 if self.focus_point is None:
                     self.focus_point = QPointF(label_anchor)
 
@@ -264,3 +319,4 @@ class ScenePainter:
             painter.setFont(self._label_font)
             painter.setPen(color)
             painter.drawText(label_anchor, item.label)
+        return bounds

@@ -34,7 +34,7 @@ from clicky.fonts import mono_font, ui_font
 from clicky.handwriting import typed_characters, wrap_text
 from clicky.overlay import exclude_window_from_capture
 from clicky.scene import Scene
-from clicky.scene_painter import ScenePainter
+from clicky.scene_painter import HIGHLIGHT_SECONDS, ScenePainter
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +147,8 @@ class LessonCard(QWidget):
         self._title_font = ui_font(14, QFont.Weight.DemiBold)
         self._label_font = ui_font(13, QFont.Weight.Medium)
         self._scene_painter = ScenePainter()
+        # (label, start time, animation block): a ring around a named object in that animation, following it.
+        self._highlight: tuple[str, float, _Block] | None = None
         self.resize(CARD_WIDTH + 2 * SHADOW, self._content_height())
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.TimerType.CoarseTimer)
@@ -218,6 +220,22 @@ class LessonCard(QWidget):
                 scene=scene,
             )
         )
+
+    @property
+    def highlighted_label(self) -> str | None:
+        return self._highlight[0] if self._highlight is not None else None
+
+    def highlight(self, label: str) -> None:
+        """Ring the object called `label` in the newest animation, following it as it moves, for a few seconds."""
+        label = " ".join(label.split())
+        animation = next((block for block in reversed(self._blocks) if block.kind == "animation"), None)
+        if not self._enabled or not label or animation is None:
+            return
+        self._highlight = (label, max(time.monotonic(), animation.starts_at), animation)
+        self._timer.start(FRAME_INTERVAL_MS)
+
+    def _highlight_active(self, now: float) -> bool:
+        return self._highlight is not None and now < self._highlight[1] + HIGHLIGHT_SECONDS
 
     def finish(self) -> None:
         """The reply ended: keep the card up a while (after anything still playing), then fade."""
@@ -326,6 +344,7 @@ class LessonCard(QWidget):
     def _reset(self) -> None:
         had_content = bool(self._blocks)
         self._blocks = []
+        self._highlight = None
         self._title = DEFAULT_TITLE
         self._fade_at = None
         self._last_writing_point = None
@@ -341,7 +360,7 @@ class LessonCard(QWidget):
         if self._fade_at is not None and self._opacity(now) <= 0:
             self._reset()
             return
-        moving = any(block.is_moving(now) for block in self._blocks)
+        moving = any(block.is_moving(now) for block in self._blocks) or self._highlight_active(now)
         fading = self._fade_at is not None and now >= self._fade_at
         if moving or fading:
             self._timer.setInterval(FRAME_INTERVAL_MS)
@@ -406,6 +425,8 @@ class LessonCard(QWidget):
                 shown = min(len(block.diagram.nodes) - 1, int((now - block.starts_at) / NODE_APPEAR_SECONDS))
                 x, y, width, height = layout.boxes[max(0, shown)]
                 return QPointF(area.left() + x + width / 2, area.top() + y + height)
+        if self._highlight_active(now) and self._scene_painter.highlight_rect is not None:
+            return self._scene_painter.highlight_rect.center()
         for block, top in reversed(started):
             if block.kind == "animation":
                 # The scene's busiest object when it has one (circles, plots), otherwise the panel's middle.
@@ -618,5 +639,8 @@ class LessonCard(QWidget):
         painter.setBrush(ANIMATION_PANEL)
         painter.drawRoundedRect(area, 12, 12)
         scene_time = max(0.0, min(scene.duration, now - block.starts_at))
-        self._scene_painter.paint(painter, area, scene, scene_time)
+        highlight = None
+        if self._highlight is not None and self._highlight[2] is block:
+            highlight = (self._highlight[0], now - self._highlight[1])
+        self._scene_painter.paint(painter, area, scene, scene_time, highlight=highlight)
         painter.restore()

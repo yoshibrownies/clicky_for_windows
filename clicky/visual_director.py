@@ -128,7 +128,7 @@ class VisualDirector(QObject):
                 self._note(event.text)
             elif event.kind == "diagram":
                 self._diagram(event.text)
-            elif event.kind in ("title", "heading", "formula"):
+            elif event.kind in ("title", "heading", "formula", "highlight"):
                 self._card_text(event.kind, event.text)
             elif event.kind == "animate":
                 self._animate(event.text)

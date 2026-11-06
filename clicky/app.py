@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-from PySide6.QtCore import QLockFile, QObject, QRect, QStandardPaths, Signal
+from PySide6.QtCore import QLockFile, QObject, QPoint, QRect, QStandardPaths, Signal
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -122,6 +122,20 @@ def build_clear_controls(director, annotation_layer, card, chips, overlay):
     return clear_all, something_visible
 
 
+def mark_covers_card(box: tuple[int, int, int, int], card_rect: QRect) -> bool:
+    """True when a screen mark's box (left, top, right, bottom, global) overlaps the lesson card."""
+    left, top, right, bottom = box
+    return QRect(QPoint(left, top), QPoint(right, bottom)).intersects(card_rect)
+
+
+def card_area(card) -> QRect:
+    """The lesson card's rectangle, or where it will dock (at full height) when it isn't up yet."""
+    if card.isVisible():
+        return card.geometry()
+    anchor = chips_anchor(card)
+    return QRect(anchor.left(), anchor.top(), anchor.width(), card._height_cap())
+
+
 def chips_anchor(card) -> QRect:
     """Where follow-up chips go: under the lesson card, or where the card would sit when there isn't one."""
     if card.isVisible():
@@ -211,9 +225,18 @@ def main() -> int:
         card.play_animation(scene)
 
     def add_card_text(kind: str, text: str) -> None:
-        {"title": card.set_title, "heading": card.add_heading, "formula": card.add_formula}[kind](text)
+        {
+            "title": card.set_title,
+            "heading": card.add_heading,
+            "formula": card.add_formula,
+            "highlight": card.highlight,
+        }[kind](text)
 
     def add_mark(event) -> None:
+        if event.box is not None and mark_covers_card(event.box, card_area(card)):
+            # Clicky can't see its own card (it's hidden from screenshots), so a mark there is a guess: drop it.
+            logger.info("Dropped a %s that overlapped the lesson card", event.kind)
+            return
         annotation_layer.add_mark(event)
         overlay.raise_()
 

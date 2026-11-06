@@ -70,3 +70,18 @@ def test_prompt_examples_with_a_card_have_followups_at_the_end():
     for reply in carded:
         kinds = [event.kind for event in reply.events]
         assert "title" in kinds and "heading" in kinds and kinds.count("followup") >= 2
+
+
+def test_prompt_teaches_live_highlights_and_that_the_card_is_invisible():
+    from clicky.prompts import COMPANION_SYSTEM_PROMPT
+    from clicky.visuals import extract_scene_blocks, parse_visual_reply
+
+    assert "[HIGHLIGHT:label]" in COMPANION_SYSTEM_PROMPT
+    assert "hidden from your screenshots" in COMPANION_SYSTEM_PROMPT
+    orbit_example = next(line for line in COMPANION_SYSTEM_PROMPT.splitlines() if "moon doesn't fall" in line)
+    reply = orbit_example.split(': "', 1)[1].rstrip('"')
+    parsed = parse_visual_reply(reply)
+    highlighted = [event.text for event in parsed.events if event.kind == "highlight"]
+    assert highlighted == ["moon", "gravity"]
+    scenes = extract_scene_blocks(reply)[1]
+    assert "orbit" in scenes and all(f"\"label\": \"{name}\"" in scenes["orbit"] for name in highlighted)

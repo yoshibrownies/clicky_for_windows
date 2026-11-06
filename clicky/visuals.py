@@ -17,7 +17,7 @@ MAX_DIAGRAMS = 1
 MAX_POINTS = 4
 MAX_ANIMATIONS = 1
 # Lesson-card text blocks: (limit per reply, maximum characters)
-CARD_TEXT_TAGS = {"TITLE": (1, 40), "HEADING": (1, 60), "FORMULA": (3, 60), "FOLLOWUP": (3, 40)}
+CARD_TEXT_TAGS = {"TITLE": (1, 40), "HEADING": (1, 60), "FORMULA": (3, 60), "FOLLOWUP": (3, 40), "HIGHLIGHT": (4, 40)}
 MAX_NOTE_LENGTH = 80
 
 # Any [UPPERCASE:...] tag. Known kinds become events; unknown ones are still stripped from speech.

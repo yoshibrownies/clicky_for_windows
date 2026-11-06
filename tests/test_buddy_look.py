@@ -60,3 +60,19 @@ def test_chips_announce_when_they_appear(qt_app):
         assert appeared == [True]
     finally:
         chips.close()
+
+
+def test_reply_text_is_never_shown_next_to_the_cursor(qt_app):
+    overlay = BuddyOverlay()
+    try:
+        assert not hasattr(overlay, "show_reply")
+        overlay.set_state("listening")
+        overlay.show_transcript("why does a ball orbit")
+        assert overlay.has_bubble  # your own words show while you talk
+        overlay.set_state("processing")
+        overlay.set_state("responding")
+        assert not overlay.has_bubble  # nothing by the cursor while Clicky explains
+        overlay.show_notice("couldn't reach the worker")
+        assert overlay.has_bubble  # short notices still show
+    finally:
+        overlay.close()

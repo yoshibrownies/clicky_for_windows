@@ -29,7 +29,6 @@ def test_overlay_runs_through_every_state_and_paints(qt_app):
             overlay.set_state(state)
             overlay.set_audio_level(0.8)
             overlay.show_transcript("where is the save button")
-            overlay.show_reply("it's up in the top left, see the floppy disk? " * 8)
             overlay.show_notice("couldn't reach the worker")
             pump(0.05)
             assert not render(overlay).isNull()

@@ -252,7 +252,6 @@ def main() -> int:
     controller.audio_level_changed.connect(overlay.set_audio_level)
     controller.audio_level_changed.connect(pill.set_audio_level)
     controller.transcript_changed.connect(overlay.show_transcript)
-    controller.reply_text_changed.connect(overlay.show_reply)
     controller.notice.connect(overlay.show_notice)
 
     def point_at(target: PointTarget) -> None:

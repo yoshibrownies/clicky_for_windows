@@ -37,7 +37,6 @@ EDGE_MARGIN = 26  # distance from the window edge to the triangle tip
 FOLLOW_OFFSET = (16.0, 18.0)  # where the buddy sits relative to the system cursor
 FOLLOW_SMOOTHING = 0.32
 HOLD_AT_TARGET_SECONDS = 3.0
-BUBBLE_LINGER_SECONDS = 6.0
 NOTICE_LINGER_SECONDS = 5.0
 IDLE_FADE_DELAY_SECONDS = 1.0
 FRAME_INTERVAL_MS = 16
@@ -56,7 +55,7 @@ WDA_EXCLUDEFROMCAPTURE = 0x00000011
 @dataclass
 class _Bubble:
     text: str
-    kind: str  # "reply" | "transcript" | "notice"
+    kind: str  # "transcript" | "notice"
     expires_at: float | None  # None = while the current state lasts
 
 
@@ -166,8 +165,9 @@ class BuddyOverlay(QWidget):
             self._idle_since = now
             self._audio_level = 0.0
             if self._bubble is not None and self._bubble.expires_at is None:
-                linger = BUBBLE_LINGER_SECONDS if self._bubble.kind == "reply" else 0.0
-                self._bubble.expires_at = now + linger
+                self._bubble.expires_at = now
+        elif state == "responding" and self._bubble is not None and self._bubble.kind == "transcript":
+            self._bubble = None  # the answer is spoken and written on the card, not shown by the cursor
         elif state == "listening" and previous_state != "listening":
             self._bubble = None
             if self._mode in ("flying", "holding"):
@@ -184,12 +184,6 @@ class BuddyOverlay(QWidget):
         if text and self.companion_state in ("listening", "processing"):
             self._wake()
             self._bubble = _Bubble(text, "transcript", None)
-
-    def show_reply(self, text: str) -> None:
-        if text:
-            self._wake()
-            expires_at = None if self.companion_state != "idle" else time.monotonic() + BUBBLE_LINGER_SECONDS
-            self._bubble = _Bubble(text, "reply", expires_at)
 
     @property
     def has_bubble(self) -> bool:

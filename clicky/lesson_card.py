@@ -66,7 +66,6 @@ IDLE_CHECK_INTERVAL_MS = 200
 WRITING_POINT_INTERVAL_SECONDS = 1 / 30
 CLOSE_BUTTON_SIZE = 24
 WHEEL_PIXELS_PER_NOTCH = 40
-MARK_AVOID_SECONDS = 12.0  # about as long as an underline or circle stays on screen
 GLIDE_MS = 260
 DOCK_MARGIN = 16
 
@@ -117,6 +116,7 @@ class LessonCard(QWidget):
     faded = Signal()  # the card went away (faded out or cleared)
     appeared = Signal()  # a new card just came up (the buddy is raised above it)
     moved = Signal()  # the card's window moved (dragged, or glided out of a mark's way)
+    closed = Signal()  # closed with the x: stays away for the rest of this reply
 
     def __init__(
         self,
@@ -151,6 +151,7 @@ class LessonCard(QWidget):
         self._characters_per_second = characters_per_second
         self._max_height_override = max_height
         self._enabled = True
+        self._dismissed = False  # closed with the x during this reply
         self._title = DEFAULT_TITLE
         self._blocks: list[_Block] = []
         self._fade_at: float | None = None
@@ -194,13 +195,21 @@ class LessonCard(QWidget):
         now = time.monotonic()
         return sum(block.progress(now) for block in self._blocks) / len(self._blocks)
 
+    @property
+    def _accepting(self) -> bool:
+        return self._enabled and not self._dismissed
+
+    def start_reply(self) -> None:
+        """A new question: a card closed with the x during the last answer may come back."""
+        self._dismissed = False
+
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
         if not enabled:
             self.clear()
 
     def set_title(self, text: str) -> None:
-        if self._enabled and text.strip():
+        if self._accepting and text.strip():
             self._title = " ".join(text.split())
             self.update()
 
@@ -214,7 +223,7 @@ class LessonCard(QWidget):
         self._add_text_block("formula", text)
 
     def set_diagram(self, spec: str) -> None:
-        if not self._enabled:
+        if not self._accepting:
             return
         diagram = parse_diagram(spec)
         if not diagram.nodes:
@@ -223,7 +232,7 @@ class LessonCard(QWidget):
         self._append(_Block("diagram", spec, self._next_start(), reveal, DIAGRAM_BLOCK_HEIGHT, [], diagram=diagram))
 
     def play_animation(self, scene: Scene | None) -> None:
-        if not self._enabled or scene is None:
+        if not self._accepting or scene is None:
             return
         self._append(
             _Block(
@@ -237,10 +246,23 @@ class LessonCard(QWidget):
             )
         )
 
-    def avoid(self, rect: QRect, seconds: float = MARK_AVOID_SECONDS) -> None:
-        """A mark was drawn on screen at `rect` (global). Keep the card off it so you can see what Clicky means."""
-        self._marks.append((QRect(rect), time.monotonic() + seconds))
+    def avoid(self, rect: QRect, seconds: float | None = None) -> None:
+        """A mark was drawn on screen at `rect` (global). Keep the card off it so you can see what Clicky means.
+
+        Kept until `forget_marks()` (the marks were cleared or faded), or for `seconds` if given.
+        """
+        expires = math.inf if seconds is None else time.monotonic() + seconds
+        self._marks.append((QRect(rect), expires))
         self._dodge_marks()
+
+    def forget_marks(self) -> None:
+        self._marks = []
+
+    def _hold_fade(self) -> None:
+        """You're using the card (scrolling, dragging, pointing at it): don't fade it away under you."""
+        if self._fade_at is None or self._active_fade_seconds == CLEAR_FADE_SECONDS:
+            return
+        self._fade_at = max(self._fade_at, time.monotonic() + self._linger_seconds)
 
     def _live_marks(self) -> list[QRect]:
         now = time.monotonic()
@@ -275,8 +297,8 @@ class LessonCard(QWidget):
 
     def _dodge_marks(self) -> None:
         """If the visible card covers a live mark, glide to a spot that doesn't."""
-        if not self.isVisible() or not self._blocks:
-            return
+        if not self.isVisible() or not self._blocks or self._drag_offset is not None:
+            return  # never yank the card out from under your mouse
         marks = self._live_marks()
         here = self._glide.endValue() if self._glide.state() == QPropertyAnimation.State.Running else self.pos()
         if not marks or self._overlap_with_marks(here, marks) == 0:
@@ -300,7 +322,7 @@ class LessonCard(QWidget):
         """Ring the object called `label` in the newest animation, following it as it moves, for a few seconds."""
         label = " ".join(label.split())
         animation = next((block for block in reversed(self._blocks) if block.kind == "animation"), None)
-        if not self._enabled or not label or animation is None:
+        if not self._accepting or not label or animation is None:
             return
         self._highlight = (label, max(time.monotonic(), animation.starts_at), animation)
         self._timer.start(FRAME_INTERVAL_MS)
@@ -357,7 +379,7 @@ class LessonCard(QWidget):
 
     def _add_text_block(self, kind: str, text: str) -> None:
         text = " ".join(text.split())
-        if not self._enabled or not text:
+        if not self._accepting or not text:
             return
         _, _, line_height, speed = TEXT_STYLES[kind]
         indent = NOTE_INDENT if kind == "note" else 0
@@ -386,6 +408,7 @@ class LessonCard(QWidget):
         height = self._content_height()
         if height > self.height():
             self.resize(self.width(), height)
+            self._keep_bottom_on_screen()
             self._dodge_marks()  # a taller card may now cover a mark
         if not was_visible:
             self.show()
@@ -396,6 +419,7 @@ class LessonCard(QWidget):
         self.update()
 
     def _dock(self) -> None:
+        self._glide.stop()
         if self._user_position is not None:
             spot = QRect(self._user_position, self.size())
             screen = QGuiApplication.screenAt(spot.center())
@@ -410,6 +434,17 @@ class LessonCard(QWidget):
         if screen is None:
             return
         self.move(self._clear_spot(self._dock_spots(screen)[0], screen))
+
+    def _keep_bottom_on_screen(self) -> None:
+        """A card dragged low slides up as it grows, so the newest line (written at the bottom) stays visible."""
+        screen = QGuiApplication.screenAt(self.geometry().center()) or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        lowest_top = available.bottom() - chips_reserve() - self.height()
+        if self.y() > lowest_top:
+            self._glide.stop()
+            self.move(self.x(), max(available.top(), lowest_top))
 
     def _blocks_height(self) -> float:
         if not self._blocks:
@@ -442,6 +477,8 @@ class LessonCard(QWidget):
         self._blocks = []
         self._user_scroll = 0.0
         self._drag_offset = None
+        self._glide.stop()
+        self.unsetCursor()
         self._highlight = None
         self._title = DEFAULT_TITLE
         self._fade_at = None
@@ -562,11 +599,14 @@ class LessonCard(QWidget):
         if self.close_button_rect().contains(position):
             return  # handled on release, so a press that slides off doesn't close
         if self._title_bar_rect().contains(position):
+            self._glide.stop()  # your drag wins over a glide out of a mark's way
+            self._hold_fade()
             self._drag_offset = event.globalPosition().toPoint() - self.pos()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt override)
         position = event.position()
+        self._hold_fade()
         if self._drag_offset is not None:
             self.move(event.globalPosition().toPoint() - self._drag_offset)
             return
@@ -590,7 +630,9 @@ class LessonCard(QWidget):
             self.setCursor(Qt.CursorShape.OpenHandCursor)
             return
         if self.close_button_rect().contains(event.position()):
+            self._dismissed = True  # gone for the rest of this answer
             self.clear()
+            self.closed.emit()
 
     def leaveEvent(self, event) -> None:  # noqa: N802 (Qt override)
         if self._close_hovered:
@@ -601,6 +643,7 @@ class LessonCard(QWidget):
         notches = event.angleDelta().y() / 120
         if not notches or not self._blocks:
             return
+        self._hold_fade()
         now = time.monotonic()
         previous_scroll = self._user_scroll
         self._user_scroll = 0.0

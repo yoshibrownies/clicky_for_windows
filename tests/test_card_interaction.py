@@ -199,3 +199,100 @@ def test_a_mark_under_a_spot_you_dragged_it_to_still_wins(qt_app):
         assert card.pos() != card._user_position
     finally:
         card.close()
+
+
+def test_marks_are_kept_until_forgotten_not_for_a_fixed_time(qt_app):
+    available = QApplication.primaryScreen().availableGeometry()
+    card = make_card()
+    try:
+        mark = QRect(available.right() - 120, available.top() + 100, 100, 24)
+        card.avoid(mark)
+        card._marks = [(rect, expires - 60) for rect, expires in card._marks]  # a minute later: still on screen
+        card.add_note("hello")
+        assert not overlaps(card, mark)
+        card.clear()
+        pump(0.4)
+        card.forget_marks()  # the marks were cleared or faded
+        card.add_note("again")
+        assert overlaps(card, mark)  # back at the usual top-right spot
+    finally:
+        card.close()
+
+
+def test_a_card_dragged_low_keeps_its_bottom_on_screen(qt_app):
+    available = QApplication.primaryScreen().availableGeometry()
+    card = make_card()
+    try:
+        card.add_note("hello")
+        card._user_position = QPoint(available.left() + 40, available.bottom() - 150)
+        card.clear()
+        pump(0.4)
+        for index in range(10):
+            card.add_note(f"note number {index} that is long enough to wrap onto a second line")
+        assert card.geometry().bottom() <= available.bottom()
+    finally:
+        card.close()
+
+
+def test_close_button_dismisses_the_card_for_the_rest_of_the_reply(qt_app):
+    card = make_card()
+    closed = []
+    card.closed.connect(lambda: closed.append(True))
+    try:
+        card.add_note("hello")
+        button = card.close_button_rect().center().toPoint()
+        QTest.mouseClick(card, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, button)
+        pump(0.4)
+        assert closed
+        card.add_note("a later note from the same answer")  # must not bring the card back
+        assert not card.isVisible()
+        card.start_reply()  # the next question
+        card.add_note("next answer")
+        assert card.isVisible()
+    finally:
+        card.close()
+
+
+def test_pressing_the_title_bar_stops_a_glide(qt_app):
+    card = make_card()
+    try:
+        card.add_note("hello")
+        card.avoid(QRect(card.x() + 220, card.y() + 60, 120, 24))  # starts gliding left
+        grab = title_point(card)
+        QTest.mousePress(card, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, grab)
+        QTest.mouseMove(card, grab + QPoint(0, 200))
+        held_at = card.pos()
+        pump(0.4)  # longer than the glide
+        assert card.pos() == held_at  # the drag wins
+        QTest.mouseRelease(card, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, grab + QPoint(0, 200))
+    finally:
+        card.close()
+
+
+def test_a_glide_never_carries_over_to_the_next_card(qt_app):
+    card = make_card()
+    try:
+        card.add_note("hello")
+        card.avoid(QRect(card.x() + 220, card.y() + 60, 120, 24))
+        card.forget_marks()
+        card._reset()  # cleared mid-glide
+        card.add_note("new card")
+        docked = card.pos()
+        pump(0.4)
+        assert card.pos() == docked
+    finally:
+        card.close()
+
+
+def test_using_the_card_holds_off_the_fade(qt_app):
+    card = make_card(linger_seconds=0.3)
+    try:
+        card.add_note("hello")
+        pump(0.1)
+        card.finish()
+        for _ in range(4):  # keep scrolling for longer than the linger
+            pump(0.15)
+            wheel(card, 120)
+        assert card.isVisible()
+    finally:
+        card.close()

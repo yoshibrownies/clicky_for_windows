@@ -11,7 +11,7 @@ import math
 import time
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen, QScreen
 from PySide6.QtWidgets import QWidget
 
@@ -164,6 +164,8 @@ class _ScreenLayerWindow(QWidget):
 
 
 class AnnotationLayer(QObject):
+    emptied = Signal()  # the last mark faded away (or was cleared)
+
     def __init__(
         self,
         linger_seconds: float = DEFAULT_LINGER_SECONDS,
@@ -175,6 +177,7 @@ class AnnotationLayer(QObject):
         self._fade_seconds = fade_seconds
         self._windows: dict[str, _ScreenLayerWindow] = {}
         self._mark_count = 0
+        self._had_marks = False
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.TimerType.CoarseTimer)
         self._timer.setInterval(FRAME_INTERVAL_MS)
@@ -217,6 +220,7 @@ class AnnotationLayer(QObject):
                 CIRCLE_DRAW_SECONDS,
             )
         window.marks.append(mark)
+        self._had_marks = True
         window.show_if_needed()
         self._timer.start(FRAME_INTERVAL_MS)
 
@@ -269,6 +273,9 @@ class AnnotationLayer(QObject):
                 window.update()  # repaint only while a stroke is drawing or fading
             elif any(mark.fade_at is not None for mark in window.marks):
                 waiting_to_fade = True
+        if self._had_marks and not any(window.marks for window in self._windows.values()):
+            self._had_marks = False
+            self.emptied.emit()
         if anything_moving:
             self._timer.setInterval(FRAME_INTERVAL_MS)
         elif waiting_to_fade:

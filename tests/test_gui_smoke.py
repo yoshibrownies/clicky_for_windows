@@ -201,7 +201,7 @@ def test_clear_all_reaches_every_visual_and_reports_visibility(qt_app):
         def clear(self):
             calls.append(self.name)
 
-        cancel = dismiss_bubble = hide_options = release_guide = clear
+        cancel = dismiss_bubble = hide_options = release_guide = forget_marks = clear
 
         def isVisible(self):  # noqa: N802 (mirrors Qt)
             return self.visible
@@ -223,7 +223,8 @@ def test_clear_all_reaches_every_visual_and_reports_visibility(qt_app):
     clear_all, something_visible = build_clear_controls(director, layer, card, chips, overlay)
     assert something_visible()
     clear_all()
-    assert calls == ["director", "layer", "card", "chips", "overlay", "overlay"]  # bubble, then the buddy is freed
+    # the card forgets its marks then clears; the overlay drops the bubble, then frees the buddy
+    assert calls == ["director", "layer", "card", "card", "chips", "overlay", "overlay"]
     card.visible = False
     assert not something_visible()
 

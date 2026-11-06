@@ -108,3 +108,20 @@ def test_mark_without_box_is_ignored(qt_app):
         assert not layer.is_animating
     finally:
         layer.close_all()
+
+
+def test_layer_says_when_every_mark_is_gone(qt_app):
+    screen_geometry = QGuiApplication.primaryScreen().geometry()
+    layer = AnnotationLayer(linger_seconds=0.05, fade_seconds=0.05)
+    emptied = []
+    layer.emptied.connect(lambda: emptied.append(True))
+    try:
+        x, y = screen_geometry.x(), screen_geometry.y()
+        layer.add_mark(ScreenVisualEvent(kind="underline", fraction=0, box=(x + 50, y + 40, x + 250, y + 60)))
+        pump(0.2)
+        assert not emptied
+        layer.finish()
+        pump(0.6)
+        assert emptied
+    finally:
+        layer.close_all()

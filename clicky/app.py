@@ -111,6 +111,7 @@ def build_clear_controls(director, annotation_layer, card, chips, overlay):
     def clear_all() -> None:
         director.cancel()
         annotation_layer.clear()
+        card.forget_marks()
         card.clear()
         chips.hide_options()
         overlay.dismiss_bubble()
@@ -231,7 +232,9 @@ def main() -> int:
 
     def clear_visuals() -> None:
         annotation_layer.clear()
+        card.forget_marks()
         card.clear()
+        card.start_reply()
         chips.hide_options()
 
     def finish_visuals() -> None:
@@ -295,6 +298,8 @@ def main() -> int:
             chips.show_options(chips.options(), below=card.geometry())
 
     card.moved.connect(chips_follow_card)
+    card.closed.connect(overlay.release_guide)  # no card, no pen to follow
+    annotation_layer.emptied.connect(card.forget_marks)  # marks gone: the card may use its usual spot again
     # Every Clicky window is always-on-top, and Windows stacks the newest one highest: lift the buddy back above
     # the card, the chips and fresh marks so it is never drawn behind them.
     card.appeared.connect(overlay.raise_)

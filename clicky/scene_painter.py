@@ -149,7 +149,7 @@ class ScenePainter:
                 target = bounds
         painter.restore()
         if highlight is not None and target is not None:
-            self._paint_highlight(painter, target, highlight[1])
+            self._paint_highlight(painter, target, highlight[1], board)
 
         caption = scene.caption_at(t)
         if caption is not None:
@@ -205,14 +205,21 @@ class ScenePainter:
             painter.drawText(QRectF(-plot.height() / 2, -10, plot.height(), 20), Qt.AlignmentFlag.AlignCenter, y_label)
             painter.restore()
 
-    def _paint_highlight(self, painter: QPainter, target: QRectF, elapsed: float) -> None:
+    def _paint_highlight(self, painter: QPainter, target: QRectF, elapsed: float, board: QRectF) -> None:
         """A red ring that draws itself around the target, holds, then fades."""
         if elapsed < 0 or elapsed >= HIGHLIGHT_SECONDS:
             return
         grow = min(1.0, elapsed / HIGHLIGHT_GROW_SECONDS)
         fade = min(1.0, (HIGHLIGHT_SECONDS - elapsed) / HIGHLIGHT_FADE_SECONDS)
-        size = max(target.width(), target.height(), 14.0) + 2 * HIGHLIGHT_PADDING
-        ring = QRectF(target.center().x() - size / 2, target.center().y() - size / 2, size, size)
+        # An ellipse that hugs the object (a tall bar gets a tall ring), never smaller than a small circle, kept
+        # inside the animation panel so it can't spill over the card's notes.
+        center = target.center()
+        width = max(target.width(), 14.0) + 2 * HIGHLIGHT_PADDING
+        height = max(target.height(), 14.0) + 2 * HIGHLIGHT_PADDING
+        ring = QRectF(center.x() - width / 2, center.y() - height / 2, width, height)
+        ring = ring.intersected(board.adjusted(3, 3, -3, -3))
+        if ring.isEmpty():
+            return
         color = QColor(HIGHLIGHT_COLOR)
         color.setAlphaF(fade)
         painter.save()

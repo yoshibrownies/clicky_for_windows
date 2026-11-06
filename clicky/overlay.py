@@ -38,6 +38,7 @@ FOLLOW_OFFSET = (16.0, 18.0)  # where the buddy sits relative to the system curs
 FOLLOW_SMOOTHING = 0.32
 HOLD_AT_TARGET_SECONDS = 3.0
 NOTICE_LINGER_SECONDS = 5.0
+NOTICE_READING_CHARACTERS_PER_SECOND = 15.0  # long notices stay up long enough to read
 IDLE_FADE_DELAY_SECONDS = 1.0
 FRAME_INTERVAL_MS = 16
 HIDDEN_IDLE_INTERVAL_MS = 120
@@ -200,7 +201,8 @@ class BuddyOverlay(QWidget):
     def show_notice(self, text: str) -> None:
         if text:
             self._wake()
-            self._bubble = _Bubble(text, "notice", time.monotonic() + NOTICE_LINGER_SECONDS)
+            linger = max(NOTICE_LINGER_SECONDS, len(text) / NOTICE_READING_CHARACTERS_PER_SECOND)
+            self._bubble = _Bubble(text, "notice", time.monotonic() + linger)
 
     def set_always_visible(self, always_visible: bool) -> None:
         self._wake()

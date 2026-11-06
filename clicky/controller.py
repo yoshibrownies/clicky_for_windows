@@ -462,8 +462,13 @@ class CompanionController(QObject):
             self.point_requested.emit(reply.point_target)
         if reply.speech_audio is None:
             self._set_state(CompanionState.IDLE)
+            # No voice, so show the answer itself (the cursor shows no reply text while Clicky talks).
             if reply.speech_error:
-                self.notice.emit(f"couldn't play the voice: {reply.speech_error}")
+                self.notice.emit(
+                    f"couldn't play the voice: {reply.speech_error}. here's my answer: {reply.spoken_text}"
+                )
+            elif reply.spoken_text:
+                self.notice.emit(reply.spoken_text)
             return
         self._set_state(CompanionState.RESPONDING)
         self._player.play(reply.speech_audio)

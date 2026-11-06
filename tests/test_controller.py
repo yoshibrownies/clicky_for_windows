@@ -527,3 +527,14 @@ def test_blank_typed_question_is_ignored(qt_app, runner):
     controller, _, _, _ = make_controller(runner, services)
     controller.ask_typed("   ")
     assert controller.state is CompanionState.IDLE
+
+
+def test_tts_failure_shows_the_answer_as_text(qt_app, runner):
+    services = FakeServices(tts_error=RuntimeError("Text-to-speech failed (401)"))
+    controller, player, _, recorded = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: recorded["notices"])
+    notice = recorded["notices"][-1]
+    assert "couldn't play the voice" in notice
+    assert len(notice) > len("couldn't play the voice: Text-to-speech failed (401)") + 5  # the answer is in it

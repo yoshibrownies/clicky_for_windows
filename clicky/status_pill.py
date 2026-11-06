@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import time
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter, QPolygonF
 from PySide6.QtWidgets import QWidget
 
@@ -28,6 +28,8 @@ GREEN = QColor(74, 196, 132)
 
 
 class StatusPill(QWidget):
+    appeared = Signal()  # shown (the buddy is raised above the pill)
+
     def __init__(self, hide_delay_seconds: float = 0.6, fade_seconds: float = 0.3) -> None:
         super().__init__(None)
         self.setWindowFlags(
@@ -74,6 +76,7 @@ class StatusPill(QWidget):
                 self.show()
                 if not self._capture_exclusion_applied:
                     self._capture_exclusion_applied = exclude_window_from_capture(int(self.winId()))
+                self.appeared.emit()
             self._timer.start()
         elif state == "idle" and self.isVisible():
             self._idle_since = time.monotonic()

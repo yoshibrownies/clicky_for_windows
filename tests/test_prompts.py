@@ -84,4 +84,4 @@ def test_prompt_teaches_live_highlights_and_that_the_card_is_invisible():
     highlighted = [event.text for event in parsed.events if event.kind == "highlight"]
     assert highlighted == ["moon", "gravity"]
     scenes = extract_scene_blocks(reply)[1]
-    assert "orbit" in scenes and all(f"\"label\": \"{name}\"" in scenes["orbit"] for name in highlighted)
+    assert "orbit" in scenes and all(f'"label": "{name}"' in scenes["orbit"] for name in highlighted)

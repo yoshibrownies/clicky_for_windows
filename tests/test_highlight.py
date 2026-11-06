@@ -87,3 +87,70 @@ def test_screen_marks_over_the_card_are_dropped(qt_app):
     card_rect = QRect(1000, 56, 444, 600)
     assert mark_covers_card((950, 300, 1100, 340), card_rect)  # half on the card, half on the desktop
     assert not mark_covers_card((100, 300, 300, 340), card_rect)
+
+
+def test_pen_goes_to_the_ring_even_while_a_note_is_typing(qt_app):
+    from clicky.lesson_card import LessonCard
+
+    card = LessonCard(characters_per_second=10)  # slow typing: the note is still being written
+    try:
+        card.play_animation(parse_scene(json.dumps(ORBIT)))
+        card.add_note("the ball keeps going round and round the centre")
+        deadline = time.monotonic() + 0.9
+        from PySide6.QtWidgets import QApplication
+
+        while time.monotonic() < deadline:
+            QApplication.processEvents()
+            time.sleep(0.005)
+        card.highlight("ball")
+        for _ in range(5):
+            card.repaint()
+            QApplication.processEvents()
+        ring = card._scene_painter.highlight_rect
+        assert ring is not None
+        pen = card._pen_position(time.monotonic())
+        assert pen is not None and ring.contains(pen)
+    finally:
+        card.close()
+
+
+def test_ring_hugs_tall_objects_and_stays_inside_the_panel(qt_app):
+    tall = {
+        "duration": 2,
+        "world": {"x": [0, 10], "y": [0, 10]},
+        "objects": [
+            {"type": "rect", "x": 4.5, "y": 0, "w": 1, "h": 9, "color": "orange", "label": "5"},
+            {"type": "line", "x1": -50, "y1": 5, "x2": 60, "y2": 5, "label": "ground"},
+        ],
+    }
+    scene_painter = ScenePainter()
+    image = QImage(400, 300, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(QColor(255, 255, 255))
+    area = QRectF(0, 0, 400, 300)
+    for label in ("5", "ground"):
+        painter = QPainter(image)
+        try:
+            scene_painter.paint(painter, area, parse_scene(json.dumps(tall)), 0.5, highlight=(label, 1.0))
+        finally:
+            painter.end()
+        ring = scene_painter.highlight_rect
+        assert ring is not None
+        assert area.contains(ring), label  # never spills outside the animation panel
+    # the tall bar gets a tall, narrow ring, not a huge circle that also rings its neighbours
+    painter = QPainter(image)
+    try:
+        scene_painter.paint(painter, area, parse_scene(json.dumps(tall)), 0.5, highlight=("5", 1.0))
+    finally:
+        painter.end()
+    ring = scene_painter.highlight_rect
+    assert ring.width() < ring.height() / 2
+
+
+def test_marks_are_only_dropped_over_a_card_that_is_actually_up(qt_app):
+    from clicky.app import card_area
+
+    class HiddenCard:
+        def isVisible(self):  # noqa: N802 (mirrors Qt)
+            return False
+
+    assert card_area(HiddenCard()) is None  # no card on screen: nothing to protect, keep every mark

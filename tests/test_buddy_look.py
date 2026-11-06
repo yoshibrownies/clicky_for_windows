@@ -76,3 +76,32 @@ def test_reply_text_is_never_shown_next_to_the_cursor(qt_app):
         assert overlay.has_bubble  # short notices still show
     finally:
         overlay.close()
+
+
+def test_status_pill_announces_when_it_appears(qt_app):
+    from clicky.status_pill import StatusPill
+
+    pill = StatusPill()
+    appeared = []
+    pill.appeared.connect(lambda: appeared.append(True))
+    try:
+        pill.set_state("listening")
+        pill.set_state("processing")  # already up: no second announcement
+        assert appeared == [True]
+    finally:
+        pill.close()
+
+
+def test_long_notices_stay_up_long_enough_to_read(qt_app):
+    import time
+
+    overlay = BuddyOverlay()
+    try:
+        overlay.show_notice("short")
+        short_left = overlay._bubble.expires_at - time.monotonic()
+        overlay.show_notice("a whole spoken answer that has to be read instead of heard. " * 6)
+        long_left = overlay._bubble.expires_at - time.monotonic()
+        assert short_left <= 6
+        assert long_left >= 15
+    finally:
+        overlay.close()

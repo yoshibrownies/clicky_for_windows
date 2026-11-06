@@ -128,12 +128,9 @@ def mark_covers_card(box: tuple[int, int, int, int], card_rect: QRect) -> bool:
     return QRect(QPoint(left, top), QPoint(right, bottom)).intersects(card_rect)
 
 
-def card_area(card) -> QRect:
-    """The lesson card's rectangle, or where it will dock (at full height) when it isn't up yet."""
-    if card.isVisible():
-        return card.geometry()
-    anchor = chips_anchor(card)
-    return QRect(anchor.left(), anchor.top(), anchor.width(), card._height_cap())
+def card_area(card) -> QRect | None:
+    """The lesson card's rectangle while it is on screen, else None (nothing to protect)."""
+    return card.geometry() if card.isVisible() else None
 
 
 def chips_anchor(card) -> QRect:
@@ -233,7 +230,8 @@ def main() -> int:
         }[kind](text)
 
     def add_mark(event) -> None:
-        if event.box is not None and mark_covers_card(event.box, card_area(card)):
+        area = card_area(card)
+        if event.box is not None and area is not None and mark_covers_card(event.box, area):
             # Clicky can't see its own card (it's hidden from screenshots), so a mark there is a guess: drop it.
             logger.info("Dropped a %s that overlapped the lesson card", event.kind)
             return
@@ -307,6 +305,7 @@ def main() -> int:
     # the card, the chips and fresh marks so it is never drawn behind them.
     card.appeared.connect(overlay.raise_)
     chips.appeared.connect(overlay.raise_)
+    pill.appeared.connect(overlay.raise_)
     controller.state_changed.connect(on_state_for_pen_and_chips)
     chips.chosen.connect(controller.ask_typed)
 

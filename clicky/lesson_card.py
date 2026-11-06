@@ -414,6 +414,8 @@ class LessonCard(QWidget):
             for block, top in zip(self._blocks, self._block_tops(now), strict=False)
             if block.starts_at <= now and block.is_moving(now)
         ]
+        if self._highlight_active(now) and self._scene_painter.highlight_rect is not None:
+            return self._scene_painter.highlight_rect.center()  # a ringed object beats the writing
         for block, top in reversed(started):
             if block.progress(now) >= 1.0:
                 continue
@@ -425,8 +427,6 @@ class LessonCard(QWidget):
                 shown = min(len(block.diagram.nodes) - 1, int((now - block.starts_at) / NODE_APPEAR_SECONDS))
                 x, y, width, height = layout.boxes[max(0, shown)]
                 return QPointF(area.left() + x + width / 2, area.top() + y + height)
-        if self._highlight_active(now) and self._scene_painter.highlight_rect is not None:
-            return self._scene_painter.highlight_rect.center()
         for block, top in reversed(started):
             if block.kind == "animation":
                 # The scene's busiest object when it has one (circles, plots), otherwise the panel's middle.

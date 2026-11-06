@@ -108,6 +108,7 @@ class _Block:
 class LessonCard(QWidget):
     writing_point = Signal(object)  # QPoint, global: where the pen is right now
     faded = Signal()  # the card went away (faded out or cleared)
+    appeared = Signal()  # a new card just came up (the buddy is raised above it)
 
     def __init__(
         self,
@@ -285,6 +286,7 @@ class LessonCard(QWidget):
             self.show()
             if not self._capture_exclusion_applied:
                 self._capture_exclusion_applied = exclude_window_from_capture(int(self.winId()))
+            self.appeared.emit()
         self._timer.start(FRAME_INTERVAL_MS)
         self.update()
 

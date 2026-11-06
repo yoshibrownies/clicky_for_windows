@@ -22,7 +22,6 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
-    QPolygonF,
     QRadialGradient,
 )
 from PySide6.QtWidgets import QWidget
@@ -59,6 +58,33 @@ class _Bubble:
     text: str
     kind: str  # "reply" | "transcript" | "notice"
     expires_at: float | None  # None = while the current state lasts
+
+
+BUDDY_CORNER_RADIUS = 3.0
+
+
+def _rounded_triangle(corners: list[QPointF], radius: float) -> QPainterPath:
+    """A closed path through the corners with each corner rounded off by `radius` pixels."""
+    path = QPainterPath()
+    count = len(corners)
+    for index, corner in enumerate(corners):
+        previous_corner = corners[index - 1]
+        next_corner = corners[(index + 1) % count]
+
+        def toward(target: QPointF, origin: QPointF = corner) -> QPointF:
+            dx, dy = target.x() - origin.x(), target.y() - origin.y()
+            length = math.hypot(dx, dy) or 1.0
+            step = min(radius, length / 2) / length
+            return QPointF(origin.x() + dx * step, origin.y() + dy * step)
+
+        start, end = toward(previous_corner), toward(next_corner)
+        if index == 0:
+            path.moveTo(start)
+        else:
+            path.lineTo(start)
+        path.quadTo(corner, end)
+    path.closeSubpath()
+    return path
 
 
 def exclude_window_from_capture(window_handle: int) -> bool:
@@ -350,20 +376,17 @@ class BuddyOverlay(QWidget):
         painter.setBrush(glow)
         painter.drawEllipse(QPointF(tip_x + 7, tip_y + 9), 22, 22)
 
-        triangle = QPolygonF(
-            [QPointF(tip_x, tip_y), QPointF(tip_x + 5.5, tip_y + 19), QPointF(tip_x + 18, tip_y + 8.5)]
+        triangle = _rounded_triangle(
+            [QPointF(tip_x, tip_y), QPointF(tip_x + 5.5, tip_y + 19), QPointF(tip_x + 18, tip_y + 8.5)],
+            BUDDY_CORNER_RADIUS,
         )
-        painter.setPen(
-            QPen(
-                QColor(255, 255, 255, 235),
-                1.6,
-                Qt.PenStyle.SolidLine,
-                Qt.PenCapStyle.RoundCap,
-                Qt.PenJoinStyle.RoundJoin,
-            )
-        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        # A soft shadow (two faint offset layers) instead of an outline, then the blue body.
+        for offset, alpha in ((2.2, 22), (1.2, 38)):
+            painter.setBrush(QColor(15, 23, 42, alpha))
+            painter.drawPath(triangle.translated(offset * 0.4, offset))
         painter.setBrush(BUDDY_BLUE)
-        painter.drawPolygon(triangle)
+        painter.drawPath(triangle)
 
     def _side_origin(self, anchor_x: float, anchor_y: float, width: float, height: float) -> QPointF:
         """Top-left for a box placed beside the buddy, on whichever side has room."""

@@ -39,6 +39,7 @@ def _screen_for(rect: QRect):
 
 class FollowUpChips(QWidget):
     chosen = Signal(str)
+    appeared = Signal()  # shown (the buddy is raised above the chips)
 
     def __init__(self) -> None:
         super().__init__(None)
@@ -102,6 +103,7 @@ class FollowUpChips(QWidget):
         if not self._capture_exclusion_applied:
             self._capture_exclusion_applied = exclude_window_from_capture(int(self.winId()))
         self.update()
+        self.appeared.emit()
         if hide_after is not None:
             self._hide_timer.start(int(hide_after * 1000))
 

@@ -213,6 +213,10 @@ def main() -> int:
     def add_card_text(kind: str, text: str) -> None:
         {"title": card.set_title, "heading": card.add_heading, "formula": card.add_formula}[kind](text)
 
+    def add_mark(event) -> None:
+        annotation_layer.add_mark(event)
+        overlay.raise_()
+
     def point_at_event(event) -> None:
         overlay.fly_to(event.point[0], event.point[1], event.label)
 
@@ -231,7 +235,7 @@ def main() -> int:
         chips.show_options(options, below=chips_anchor(card), hide_after=hide_after)
 
     visual_director = VisualDirector(
-        annotate=annotation_layer.add_mark,
+        annotate=add_mark,
         note=card.add_note,
         diagram=card.set_diagram,
         point=point_at_event,
@@ -277,6 +281,10 @@ def main() -> int:
 
     card.writing_point.connect(follow_pen)
     card.faded.connect(chips.hide_options)
+    # Every Clicky window is always-on-top, and Windows stacks the newest one highest: lift the buddy back above
+    # the card, the chips and fresh marks so it is never drawn behind them.
+    card.appeared.connect(overlay.raise_)
+    chips.appeared.connect(overlay.raise_)
     controller.state_changed.connect(on_state_for_pen_and_chips)
     chips.chosen.connect(controller.ask_typed)
 

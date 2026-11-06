@@ -1,4 +1,4 @@
-"""Tiny flow diagrams for the notepad: parse "A -> B -> C; B -> D" and lay the boxes out in layers.
+"""Tiny flow diagrams for the lesson card: parse "A -> B -> C; B -> D" and lay the boxes out in layers.
 
 Pure Python (no Qt) so it can be tested directly. Boxes are (x, y, width, height) in the drawing area.
 """

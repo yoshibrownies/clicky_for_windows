@@ -117,3 +117,40 @@ def test_animate_events_go_to_the_animate_sink(qt_app):
     )
     director.on_progress(0.3)
     assert ("animate", '{"objects": []}') in sinks.calls
+
+
+def test_card_text_goes_to_the_card_and_followups_arrive_once_at_the_end(qt_app):
+    sinks = Sinks()
+    director = sinks.make_director(
+        card_text=lambda kind, text: sinks.calls.append((kind, text)),
+        followups=lambda options: sinks.calls.append(("followups", tuple(options))),
+    )
+    director.start(
+        VisualPlan(
+            spoken_text="drag slows you down",
+            events=(
+                ScreenVisualEvent(kind="title", fraction=0.0, text="drag forces"),
+                ScreenVisualEvent(kind="heading", fraction=0.0, text="What slows you down?"),
+                ScreenVisualEvent(kind="formula", fraction=0.5, text="F = ½ρCAv²"),
+                ScreenVisualEvent(kind="followup", fraction=1.0, text="Explain terminal speed"),
+                ScreenVisualEvent(kind="followup", fraction=1.0, text="Try a calculation"),
+            ),
+            has_audio=True,
+        )
+    )
+    assert ("title", "drag forces") in sinks.calls and ("heading", "What slows you down?") in sinks.calls
+    director.on_progress(1.0)  # follow-ups are not timeline events: nothing yet
+    assert not any(call[0] == "followups" for call in sinks.calls)
+    director.on_playback_finished()
+    followup_calls = [call for call in sinks.calls if call[0] == "followups"]
+    assert followup_calls == [("followups", ("Explain terminal speed", "Try a calculation"))]
+    assert sinks.calls.index(followup_calls[0]) < sinks.calls.index(("finish",))
+
+
+def test_no_followups_after_an_interruption(qt_app):
+    sinks = Sinks()
+    director = sinks.make_director(followups=lambda options: sinks.calls.append(("followups", tuple(options))))
+    director.start(VisualPlan("x", (ScreenVisualEvent(kind="followup", fraction=1.0, text="q"),), True))
+    director.cancel()
+    director.on_playback_finished()
+    assert not any(call[0] == "followups" for call in sinks.calls)

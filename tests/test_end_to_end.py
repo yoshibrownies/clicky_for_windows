@@ -344,3 +344,71 @@ def test_an_animation_scene_flows_from_the_model_to_the_whiteboard_sink(qt_app, 
 
         runner.run(stop_fake_assemblyai(), timeout=5)
         runner.stop()
+
+
+def test_lesson_card_tags_and_followups_flow_to_their_sinks(qt_app, fake_worker_url):
+    from clicky.visual_director import VisualDirector
+
+    FakeWorker.openai_reply_pieces = [
+        "[TITLE:drag forces] [HEADING:What slows you down?] drag pushes against motion. ",
+        "[FORMULA:F = ½ρCAv²] it grows with the square of speed. [NOTE:double speed, four times the drag] ",
+        "[FOLLOWUP:Explain terminal speed] [FOLLOWUP:Try a calculation]",
+    ]
+    runner = AsyncRunner()
+    fake_assemblyai = FakeAssemblyAI()
+
+    async def start_fake_assemblyai():
+        return await websockets.serve(fake_assemblyai.handler, "127.0.0.1", 0)
+
+    websocket_server = runner.run(start_fake_assemblyai(), timeout=5)
+    try:
+        websocket_port = websocket_server.sockets[0].getsockname()[1]
+        settings = load_settings({"CLICKY_WORKER_URL": fake_worker_url, "CLICKY_MODEL": "gpt-6.1-terra"})
+        services = WorkerServices(settings, assemblyai_websocket_base_url=f"ws://127.0.0.1:{websocket_port}/v3/ws")
+        controller = CompanionController(
+            runner=runner,
+            services=services,
+            microphone_factory=FakeMicrophone,
+            capture_screens=lambda: [PRIMARY],
+            player=FakePlayer(),
+            model=settings.model,
+            effort=settings.effort,
+        )
+        received = []
+        director = VisualDirector(
+            annotate=lambda event: None,
+            note=lambda text: received.append(("note", text)),
+            diagram=lambda spec: None,
+            point=lambda event: None,
+            clear=lambda: None,
+            finish=lambda: received.append(("finish",)),
+            card_text=lambda kind, text: received.append((kind, text)),
+            followups=lambda options: received.append(("followups", tuple(options))),
+        )
+        controller.visuals_ready.connect(director.start)
+        controller.state_changed.connect(director.on_state)
+        controller.handle_push_to_talk_pressed()
+        wait_until(lambda: fake_assemblyai.received_audio_bytes > 0, timeout=8)
+        controller.handle_push_to_talk_released()
+        wait_until(lambda: controller.state is CompanionState.RESPONDING, timeout=8)
+        controller.handle_playback_finished()
+
+        assert FakeWorker.tts_bodies[0]["text"] == "drag pushes against motion. it grows with the square of speed."
+        assert received == [
+            ("title", "drag forces"),
+            ("heading", "What slows you down?"),
+            ("formula", "F = ½ρCAv²"),
+            ("note", "double speed, four times the drag"),
+            ("followups", ("Explain terminal speed", "Try a calculation")),
+            ("finish",),
+        ]
+        assert FakeWorker.openai_chat_bodies[0]["max_completion_tokens"] == 8192
+        runner.run(services.aclose(), timeout=5)
+    finally:
+
+        async def stop_fake_assemblyai():
+            websocket_server.close()
+            await websocket_server.wait_closed()
+
+        runner.run(stop_fake_assemblyai(), timeout=5)
+        runner.stop()

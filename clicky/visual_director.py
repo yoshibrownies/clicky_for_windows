@@ -1,7 +1,7 @@
 """Plays a reply's visual events in time with its speech (GUI thread).
 
 The controller hands over a VisualPlan; playback progress (or a timer, when there is no audio) advances a
-VisualTimeline, and each due event goes to the sink that draws it: the annotation layer, the notepad or the buddy.
+VisualTimeline, and each due event goes to the sink that draws it: the annotation layer, the lesson card or the buddy.
 """
 
 from __future__ import annotations
@@ -30,12 +30,17 @@ class VisualDirector(QObject):
         clear: Callable[[], None],
         finish: Callable[[], None],
         animate: Callable[[str], None] | None = None,
+        card_text: Callable[[str, str], None] | None = None,
+        followups: Callable[[list[str]], None] | None = None,
         estimate_duration: Callable[[str], float] = estimated_duration_seconds,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._sinks = {"underline": annotate, "circle": annotate, "point": point}
         self._animate = animate or (lambda scene_text: None)
+        self._card_text = card_text or (lambda kind, text: None)
+        self._followups = followups or (lambda options: None)
+        self._pending_followups: list[str] = []
         self._note = note
         self._diagram = diagram
         self._clear = clear
@@ -56,7 +61,10 @@ class VisualDirector(QObject):
         """Begin a new reply's visuals. `plan` is a controller.VisualPlan."""
         self._stop_timer()
         self._clear()
-        self._timeline = VisualTimeline(plan.events) if plan.events else None
+        # Follow-up questions aren't timed: they're offered once the answer is over.
+        self._pending_followups = [event.text for event in plan.events if event.kind == "followup"]
+        timed_events = [event for event in plan.events if event.kind != "followup"]
+        self._timeline = VisualTimeline(timed_events) if (timed_events or self._pending_followups) else None
         if self._timeline is None:
             return
         self.on_progress(0.0)
@@ -75,6 +83,7 @@ class VisualDirector(QObject):
         """The reply was interrupted: forget its pending events without drawing them."""
         self._stop_timer()
         self._timeline = None
+        self._pending_followups = []
 
     def on_playback_finished(self) -> None:
         self._complete()
@@ -83,6 +92,7 @@ class VisualDirector(QObject):
         if state == "listening":
             self._stop_timer()
             self._timeline = None
+            self._pending_followups = []
             self._clear()
         elif state == "idle" and self._timeline is not None and not self._fallback_timer.isActive():
             self._complete()
@@ -94,6 +104,12 @@ class VisualDirector(QObject):
         for event in self._timeline.flush():
             self._dispatch(event)
         self._timeline = None
+        followups, self._pending_followups = self._pending_followups, []
+        if followups:
+            try:
+                self._followups(followups)
+            except Exception:
+                logger.exception("Showing follow-ups failed")
         self._finish()
 
     def _on_fallback_tick(self) -> None:
@@ -112,6 +128,8 @@ class VisualDirector(QObject):
                 self._note(event.text)
             elif event.kind == "diagram":
                 self._diagram(event.text)
+            elif event.kind in ("title", "heading", "formula"):
+                self._card_text(event.kind, event.text)
             elif event.kind == "animate":
                 self._animate(event.text)
             elif event.kind in self._sinks:

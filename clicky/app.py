@@ -11,7 +11,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-from PySide6.QtCore import QLockFile, QObject, QStandardPaths, Signal
+from PySide6.QtCore import QLockFile, QObject, QRect, QStandardPaths, Signal
+from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from clicky.annotations import AnnotationLayer
@@ -19,16 +20,17 @@ from clicky.async_runner import AsyncRunner
 from clicky.audio_capture import MicrophoneStreamer
 from clicky.config import AVAILABLE_MODELS, EFFORT_LEVELS, ConfigError, load_settings
 from clicky.controller import CompanionController, PointTarget
+from clicky.followup_chips import FollowUpChips
 from clicky.hotkey import VK_ESCAPE, HotkeyParseError, HotkeyPoller, KeyTapWatcher, PushToTalkEvent, parse_hotkey
-from clicky.notepad import NotepadWindow
+from clicky.lesson_card import LessonCard
 from clicky.overlay import BuddyOverlay
 from clicky.playback import SpeechPlayer
 from clicky.scene import parse_scene
 from clicky.screens import capture_all_screens
 from clicky.services import WorkerServices
+from clicky.status_pill import StatusPill
 from clicky.tray import ClickyTray
 from clicky.visual_director import VisualDirector
-from clicky.whiteboard import WhiteboardWindow
 
 logger = logging.getLogger("clicky")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -98,26 +100,33 @@ def mask_worker_url(worker_url: str) -> str:
     return f"{parsed_url.scheme}://{first_label[:4]}…(hidden)"
 
 
-def build_clear_controls(director, annotation_layer, notepad, whiteboard, overlay):
+def build_clear_controls(director, annotation_layer, card, chips, overlay):
     """(clear_all, something_visible) for the Esc key and the tray's Clear screen item.
 
-    Clearing removes every mark, note, diagram, animation and the speech bubble at once. Speech keeps playing:
-    clearing the screen shouldn't cut off an answer you're listening to (talking over Clicky does that).
+    Clearing removes every mark, the lesson card, the follow-up chips and the speech bubble at once. Speech keeps
+    playing: clearing the screen shouldn't cut off an answer you're listening to (talking over Clicky does that).
     """
 
     def clear_all() -> None:
         director.cancel()
         annotation_layer.clear()
-        notepad.clear()
-        whiteboard.clear()
+        card.clear()
+        chips.hide_options()
         overlay.dismiss_bubble()
 
     def something_visible() -> bool:
-        return bool(
-            annotation_layer.visible_windows() or notepad.isVisible() or whiteboard.isVisible() or overlay.has_bubble
-        )
+        return bool(annotation_layer.visible_windows() or card.isVisible() or chips.isVisible() or overlay.has_bubble)
 
     return clear_all, something_visible
+
+
+def chips_anchor(card) -> QRect:
+    """Where follow-up chips go: under the lesson card, or where the card would sit when there isn't one."""
+    if card.isVisible():
+        return card.geometry()
+    screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+    available = screen.availableGeometry() if screen else QRect(0, 0, 1280, 800)
+    return QRect(available.right() - card.width() - 16, available.top() + 56, card.width(), 0)
 
 
 class KeyTapBridge(QObject):
@@ -187,42 +196,49 @@ def main() -> int:
         notepad_visible=True,
     )
     annotation_layer = AnnotationLayer()
-    notepad = NotepadWindow()
-    whiteboard = WhiteboardWindow()
+    card = LessonCard()
+    chips = FollowUpChips()
+    pill = StatusPill()
 
     def play_animation(scene_text: str) -> None:
         scene = parse_scene(scene_text)
         if scene is None:
             logger.info("Ignored an animation scene that didn't parse")
             return
-        whiteboard.play(scene)
+        card.play_animation(scene)
+
+    def add_card_text(kind: str, text: str) -> None:
+        {"title": card.set_title, "heading": card.add_heading, "formula": card.add_formula}[kind](text)
 
     def point_at_event(event) -> None:
         overlay.fly_to(event.point[0], event.point[1], event.label)
 
     def clear_visuals() -> None:
         annotation_layer.clear()
-        notepad.clear()
-        whiteboard.clear()
+        card.clear()
+        chips.hide_options()
 
     def finish_visuals() -> None:
         annotation_layer.finish()
-        notepad.finish()
-        whiteboard.finish()
+        card.finish()
 
     visual_director = VisualDirector(
         annotate=annotation_layer.add_mark,
-        note=notepad.add_note,
-        diagram=notepad.set_diagram,
+        note=card.add_note,
+        diagram=card.set_diagram,
         point=point_at_event,
         clear=clear_visuals,
         finish=finish_visuals,
         animate=play_animation,
+        card_text=add_card_text,
+        followups=lambda options: chips.show_options(options, below=chips_anchor(card)),
     )
 
     controller.state_changed.connect(overlay.set_state)
     controller.state_changed.connect(tray.set_state)
+    controller.state_changed.connect(pill.set_state)
     controller.audio_level_changed.connect(overlay.set_audio_level)
+    controller.audio_level_changed.connect(pill.set_audio_level)
     controller.transcript_changed.connect(overlay.show_transcript)
     controller.reply_text_changed.connect(overlay.show_reply)
     controller.notice.connect(overlay.show_notice)
@@ -233,19 +249,33 @@ def main() -> int:
     controller.point_requested.connect(point_at)
     player.finished.connect(controller.handle_playback_finished)
 
-    # Underlines, circles, notes and diagrams, timed to the speech.
+    # Underlines, circles and the lesson card, timed to the speech.
     controller.visuals_ready.connect(visual_director.start)
     controller.interrupted.connect(visual_director.cancel)
     controller.state_changed.connect(visual_director.on_state)
     player.progress.connect(visual_director.on_progress)
     player.finished.connect(visual_director.on_playback_finished)
 
+    # The buddy follows the card's pen while Clicky answers, then goes back to the mouse.
+    def follow_pen(point) -> None:
+        if controller.state.value == "responding":
+            overlay.guide_to(point.x(), point.y())
+
+    def on_state_for_pen_and_chips(state: str) -> None:
+        if state in ("idle", "listening"):
+            overlay.release_guide()
+        if state == "listening":
+            chips.hide_options()
+
+    card.writing_point.connect(follow_pen)
+    controller.state_changed.connect(on_state_for_pen_and_chips)
+    chips.chosen.connect(controller.ask_typed)
+
     tray.model_selected.connect(controller.set_model)
     tray.effort_selected.connect(controller.set_effort)
-    tray.notepad_toggled.connect(notepad.set_enabled)
-    tray.notepad_toggled.connect(whiteboard.set_enabled)
+    tray.notepad_toggled.connect(card.set_enabled)
     tray.always_visible_toggled.connect(overlay.set_always_visible)
-    clear_all, something_visible = build_clear_controls(visual_director, annotation_layer, notepad, whiteboard, overlay)
+    clear_all, something_visible = build_clear_controls(visual_director, annotation_layer, card, chips, overlay)
     tray.clear_requested.connect(clear_all)
     escape_bridge = KeyTapBridge()
 
@@ -275,8 +305,9 @@ def main() -> int:
             logger.debug("Error closing HTTP client", exc_info=True)
         runner.stop()
         annotation_layer.close_all()
-        notepad.close()
-        whiteboard.close()
+        card.close()
+        chips.close()
+        pill.close()
         tray.hide()
         lock_file.unlock()
 

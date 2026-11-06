@@ -105,7 +105,7 @@ class ClickyTray(QObject):
                 effort_group.addAction(effort_action)
                 thinking_menu.addAction(effort_action)
 
-        notepad_action = QAction("Show notepad", self._menu, checkable=True)
+        notepad_action = QAction("Show lesson card", self._menu, checkable=True)
         notepad_action.setChecked(notepad_visible)
         notepad_action.toggled.connect(self.notepad_toggled.emit)
         self._menu.addAction(notepad_action)

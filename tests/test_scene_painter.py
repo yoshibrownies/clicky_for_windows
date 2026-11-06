@@ -1,18 +1,9 @@
 import json
-import time
 
 import pytest
-from PySide6.QtWidgets import QApplication
 
 from clicky.scene import parse_scene
-from clicky.whiteboard import WhiteboardWindow, WorldMapper, nice_ticks
-
-
-def pump(seconds: float) -> None:
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        QApplication.processEvents()
-        time.sleep(0.005)
+from clicky.scene_painter import WorldMapper, nice_ticks
 
 
 def short_scene(duration: float = 1.0):
@@ -64,58 +55,6 @@ def test_nice_ticks_handles_negative_and_tiny_ranges():
     ticks = nice_ticks(-5, 5)
     assert 0 in ticks and ticks[0] >= -5 and ticks[-1] <= 5
     assert 2 <= len(nice_ticks(0, 0.001)) <= 12
-
-
-def test_plays_paints_then_stops_its_timer_and_holds_the_last_frame(qt_app):
-    board = WhiteboardWindow(linger_seconds=0.1, fade_seconds=0.1)
-    board.show = lambda: None  # keep tests off the real screen
-    try:
-        board.play(short_scene(duration=1.0))  # scenes are at least 1 s long
-        assert board.is_playing
-        pump(0.3)
-        image = board.grab().toImage()
-        painted = sum(
-            1
-            for x in range(0, image.width(), 6)
-            for y in range(0, image.height(), 6)
-            if image.pixelColor(x, y).alpha() > 0
-        )
-        assert painted > 200
-        pump(0.9)
-        assert not board.is_playing
-        assert board.current_time() == pytest.approx(1.0)
-    finally:
-        board.close()
-
-
-def test_finish_fades_away_and_clear_resets(qt_app):
-    board = WhiteboardWindow(linger_seconds=0.1, fade_seconds=0.1)
-    try:
-        board.play(short_scene(duration=1.0))
-        assert board.isVisible()
-        pump(1.1)
-        board.finish()
-        pump(0.6)
-        assert not board.isVisible()
-        board.play(short_scene(duration=5))
-        board.clear()
-        pump(0.5)
-        assert not board.isVisible()
-        assert not board.is_playing
-    finally:
-        board.close()
-
-
-def test_disabled_or_missing_scene_does_nothing(qt_app):
-    board = WhiteboardWindow()
-    try:
-        board.play(None)
-        assert not board.isVisible()
-        board.set_enabled(False)
-        board.play(short_scene())
-        assert not board.isVisible()
-    finally:
-        board.close()
 
 
 def test_scene_painter_draws_into_any_rect_and_reports_a_focus_point(qt_app):

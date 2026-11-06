@@ -59,19 +59,21 @@ release.
 **Start with Windows:** press Win + R, type `shell:startup`, and put a shortcut to `Clicky.bat` in that folder.
 
 ## What it does while it talks
-Clicky explains in plain words, like a patient teacher, and shows you as it goes:
-- **Animated underlines** draw under the exact words or lines it's talking about, right on your screen.
-- **Circles** go around the button or icon it means, and the blue buddy can fly over to point.
-- **A notepad** appears at the side of your screen, and Clicky hand-writes the key points on it while it speaks.
-- **Diagrams** (boxes and arrows) draw themselves on the notepad for processes and "how things connect".
-- **Animations** play on a whiteboard next to the notepad: a ball speeding up with its velocity arrow growing,
-  a graph plotting itself, a list being sorted step by step, a pendulum swinging. Clicky writes a fresh little
-  scene for each question in its own safe animation language (shapes, arrows, plots, formulas of time,
-  keyframes); nothing it writes is ever run as code.
-- **Clear it all** any time with **Esc** (while Clicky's marks are showing) or **Clear screen** in the tray menu.
+Clicky explains properly (several sentences, an intuition, an example) and shows you as it goes:
+- **A lesson card** slides in at the side of your screen: a soft-green card with a title bar, a big handwritten
+  question, then notes, formulas, a boxes-and-arrows diagram and a little animation, written in order while it speaks.
+- **The green cursor follows the pen** while the card is being written, then goes back to your mouse.
+- **Animations** play inside the card: a ball speeding up with its velocity arrow growing, a graph plotting itself,
+  a list being sorted step by step. Clicky writes a fresh scene for each question in its own safe animation
+  language (shapes, arrows, plots, formulas of time, keyframes); nothing it writes is ever run as code.
+- **Animated underlines and circles** mark the exact words or buttons on your real screen, and the buddy can fly
+  over to point.
+- **Follow-up chips** ("Explain terminal speed", "Try a calculation") appear under the card when it finishes. Click
+  one and Clicky answers it straight away, no talking needed. They're the only part of Clicky you can click.
+- **A status pill** at the top of the screen shows Listening, Thinking or Speaking while it works.
+- **Clear it all** any time with **Esc** or **Clear screen** in the tray menu.
 
-Everything is timed to the speech, can't be clicked (it never gets in your way), and stays out of Clicky's own
-screenshots. Marks fade a few seconds after it finishes, and the notepad after about 20 seconds.
+Everything else is click-through and stays out of Clicky's own screenshots.
 
 ## Using it
 | You do | Clicky does |
@@ -80,7 +82,7 @@ screenshots. Marks fade a few seconds after it finishes, and the notepad after a
 | Press another key while holding | Cancels, so Ctrl+Alt+Del, Ctrl+Alt+T and AltGr typing are safe |
 | Release | Takes screenshots, thinks (purple spinner), then talks and points |
 | Hold Ctrl + Alt while it's talking | Interrupts it and listens again |
-| Right-click tray icon | Switch model (Claude Opus/Sonnet 5.5, GPT-6.1 Terra/Sol, GPT-6 Luna), Thinking (Fast / Balanced / Deep), Show notepad, hide the buddy when idle, forget the conversation, quit |
+| Right-click tray icon | Switch model (Claude Opus/Sonnet 5.5, GPT-6.1 Terra/Sol, GPT-6 Luna), Thinking (Fast / Balanced / Deep), Show lesson card, hide the buddy when idle, forget the conversation, quit |
 
 Settings in `.env`:
 | Variable | Default | Notes |
@@ -108,8 +110,9 @@ ElevenLabs usage. Check your dashboards after the first few days.
 | `clicky/overlay.py` | The buddy: click-through, always on top, **excluded from screen capture** so Claude never sees it |
 | `clicky/visuals.py`, `timeline.py`, `visual_director.py` | Parse the model's inline `[UNDERLINE]`/`[CIRCLE]`/`[NOTE]`/`[DIAGRAM]`/`[POINT]` tags and fire each at its moment in the speech |
 | `clicky/annotations.py` | Hand-drawn animated underlines and circles, one transparent layer per monitor |
-| `clicky/notepad.py`, `diagram.py` | The paper notepad: live handwriting and self-drawing box-and-arrow diagrams |
-| `clicky/scene.py`, `expressions.py`, `whiteboard.py` | The animation language: JSON scenes with safe formulas and keyframes, played on the whiteboard |
+| `clicky/lesson_card.py`, `handwriting.py`, `diagram.py` | The soft-green lesson card: handwriting, notes, formulas, diagrams, inline animations |
+| `clicky/scene.py`, `expressions.py`, `scene_painter.py` | The animation language: JSON scenes with safe formulas and keyframes |
+| `clicky/followup_chips.py`, `status_pill.py` | Clickable follow-up questions; the Listening/Thinking/Speaking pill |
 | `clicky/tray.py`, `playback.py`, `app.py` | Tray menu, MP3 playback, wiring |
 | `worker/` | Upstream Cloudflare Worker, unchanged |
 

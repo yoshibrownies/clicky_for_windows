@@ -14,7 +14,8 @@ from dataclasses import dataclass
 
 import httpx
 
-DEFAULT_MAX_TOKENS = 4096
+# Room for longer explanations, card tags and a scene (on reasoning models this also covers thinking).
+DEFAULT_MAX_TOKENS = 8192
 # Generous read timeout: the first byte can take a while when the model thinks before answering.
 CHAT_TIMEOUT = httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=10.0)
 

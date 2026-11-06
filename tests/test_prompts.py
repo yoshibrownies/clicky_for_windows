@@ -9,7 +9,7 @@ def test_prompt_teaches_every_visual_tag_with_examples():
 def test_prompt_asks_for_simple_explanations():
     lowered = COMPANION_SYSTEM_PROMPT.lower()
     assert "plain" in lowered and "analogy" in lowered
-    assert "notepad" in lowered
+    assert "card" in lowered
 
 
 def test_examples_write_notes_while_talking_not_only_at_the_end():
@@ -50,3 +50,23 @@ def test_every_example_animation_in_the_prompt_parses_and_fires():
 def test_prompt_asks_for_the_animation_to_start_early():
     lowered = COMPANION_SYSTEM_PROMPT.lower()
     assert "start the animation early" in lowered
+
+
+def test_prompt_teaches_the_lesson_card_and_longer_answers():
+    for tag in ("[TITLE:", "[HEADING:", "[FORMULA:", "[FOLLOWUP:"):
+        assert COMPANION_SYSTEM_PROMPT.count(tag) >= 2, f"{tag} needs a rule and an example"
+    lowered = COMPANION_SYSTEM_PROMPT.lower()
+    assert "4 to 8 sentences" in lowered
+
+
+def test_prompt_examples_with_a_card_have_followups_at_the_end():
+    import re
+
+    from clicky.visuals import parse_visual_reply
+
+    examples = re.findall(r'^- user asks[^"]*"(.*)"\s*$', COMPANION_SYSTEM_PROMPT, flags=re.MULTILINE)
+    carded = [parse_visual_reply(example) for example in examples if "[HEADING:" in example]
+    assert len(carded) >= 2
+    for reply in carded:
+        kinds = [event.kind for event in reply.events]
+        assert "title" in kinds and "heading" in kinds and kinds.count("followup") >= 2

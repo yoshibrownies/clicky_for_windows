@@ -155,7 +155,7 @@ def test_tray_thinking_menu_and_notepad_toggle(qt_app):
     thinking_menu = next(action.menu() for action in tray._menu.actions() if action.text() == "Thinking")
     deep_action = next(action for action in thinking_menu.actions() if action.text().startswith("Deep"))
     deep_action.trigger()
-    notepad_action = next(action for action in tray._menu.actions() if action.text() == "Show notepad")
+    notepad_action = next(action for action in tray._menu.actions() if action.text() == "Show lesson card")
     assert notepad_action.isChecked()
     notepad_action.trigger()
     assert efforts == ["high"]
@@ -202,11 +202,7 @@ def test_clear_all_reaches_every_visual_and_reports_visibility(qt_app):
         def clear(self):
             calls.append(self.name)
 
-        def cancel(self):
-            calls.append(self.name)
-
-        def dismiss_bubble(self):
-            calls.append(self.name)
+        cancel = dismiss_bubble = hide_options = clear
 
         def isVisible(self):  # noqa: N802 (mirrors Qt)
             return self.visible
@@ -218,18 +214,18 @@ def test_clear_all_reaches_every_visual_and_reports_visibility(qt_app):
         def has_bubble(self):
             return self.visible
 
-    director, layer, notepad, whiteboard, overlay = (
+    director, layer, card, chips, overlay = (
         Fake("director"),
         Fake("layer"),
-        Fake("notepad", visible=True),
-        Fake("whiteboard"),
+        Fake("card", visible=True),
+        Fake("chips"),
         Fake("overlay"),
     )
-    clear_all, something_visible = build_clear_controls(director, layer, notepad, whiteboard, overlay)
+    clear_all, something_visible = build_clear_controls(director, layer, card, chips, overlay)
     assert something_visible()
     clear_all()
-    assert calls == ["director", "layer", "notepad", "whiteboard", "overlay"]
-    notepad.visible = False
+    assert calls == ["director", "layer", "card", "chips", "overlay"]
+    card.visible = False
     assert not something_visible()
 
 

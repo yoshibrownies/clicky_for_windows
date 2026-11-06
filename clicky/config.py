@@ -7,14 +7,15 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 DEFAULT_HOTKEY = "win+alt"
-DEFAULT_MODEL = "claude-opus-5-5"
+DEFAULT_MODEL = "gpt-6.1-terra"
 DEFAULT_EFFORT = "medium"
 # Tray "Thinking" menu labels. Same names work for Claude (output_config.effort) and OpenAI (reasoning_effort).
 EFFORT_LEVELS = {"low": "Fast", "medium": "Balanced", "high": "Deep"}
 ALLOWED_EFFORT_LEVELS = tuple(EFFORT_LEVELS)
+# Tray "Model" menu. Claude models are hidden while the Worker's Anthropic key is rejected (401). The /chat route
+# and claude_client.py still work: to bring them back, fix the key (wrangler secret put ANTHROPIC_API_KEY) and add
+# "claude-opus-5-5": "Claude Opus 5.5" and "claude-sonnet-5-5": "Claude Sonnet 5.5" here.
 AVAILABLE_MODELS = {
-    "claude-opus-5-5": "Claude Opus 5.5",
-    "claude-sonnet-5-5": "Claude Sonnet 5.5",
     "gpt-6.1-terra": "GPT-6.1 Terra (OpenAI)",
     "gpt-6.1-sol": "GPT-6.1 Sol (OpenAI, smartest)",
     "gpt-6-luna": "GPT-6 Luna (OpenAI, cheapest)",

@@ -59,14 +59,15 @@ def test_tray_builds_menu_and_emits_model_choice(qt_app):
     from clicky.tray import ClickyTray
 
     tray = ClickyTray(
-        hotkey_text="ctrl+alt", models=AVAILABLE_MODELS, selected_model="claude-opus-5-5", always_visible=True
+        hotkey_text="ctrl+alt", models=AVAILABLE_MODELS, selected_model="gpt-6.1-terra", always_visible=True
     )
     chosen = []
     tray.model_selected.connect(chosen.append)
     model_menu = next(action.menu() for action in tray._menu.actions() if action.text() == "Model")
-    sonnet_action = next(action for action in model_menu.actions() if "Sonnet" in action.text())
-    sonnet_action.trigger()
-    assert chosen == ["claude-sonnet-5-5"]
+    sol_action = next(action for action in model_menu.actions() if "Sol" in action.text())
+    sol_action.trigger()
+    assert chosen == ["gpt-6.1-sol"]
+    assert not any("Claude" in action.text() for action in model_menu.actions())
     assert tray.pretty_hotkey == "Ctrl + Alt"
     tray.set_state("listening")
     assert "listening" in tray._status_action.text()

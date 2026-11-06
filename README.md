@@ -92,7 +92,7 @@ Settings in `.env`:
 |---|---|---|
 | `CLICKY_WORKER_URL` | (required) | Your Worker URL |
 | `CLICKY_HOTKEY` | `win+alt` | e.g. `right_ctrl`, `ctrl+win`, `f13`. Names: ctrl, alt, shift, win, left_/right_ variants, f13 to f24 |
-| `CLICKY_MODEL` | `claude-opus-5-5` | `claude-sonnet-5-5` (half the price), or OpenAI `gpt-6.1-terra` / `gpt-6-luna` (needs the `OPENAI_API_KEY` secret). Any `gpt-*` model goes to OpenAI |
+| `CLICKY_MODEL` | `gpt-6.1-terra` | `gpt-6.1-sol` (smartest) or `gpt-6-luna` (cheapest). Any `gpt-*` model goes to OpenAI. Claude (`claude-opus-5-5`, `claude-sonnet-5-5`) works if the Worker's Anthropic key is valid; hidden from the tray until then |
 | `CLICKY_EFFORT` | `medium` | `low` replies fastest; `high` thinks longest (slower, pricier). Also the tray's Thinking menu |
 
 **Cost:** each question sends one compressed screenshot per monitor (≤1600 px, about 2,000 tokens each), the

@@ -24,7 +24,7 @@ def test_reads_values_and_strips_trailing_slash():
 def test_defaults():
     settings = load_settings({"CLICKY_WORKER_URL": "http://localhost:8787"})
     assert settings.hotkey == "win+alt"
-    assert settings.model == "claude-opus-5-5"
+    assert settings.model == "gpt-6.1-terra"
     assert settings.effort == "medium"
 
 
@@ -55,3 +55,5 @@ def test_effort_levels_and_models_for_the_tray():
 
     assert EFFORT_LEVELS == {"low": "Fast", "medium": "Balanced", "high": "Deep"}
     assert "gpt-6.1-sol" in AVAILABLE_MODELS
+    # Claude is hidden while the Worker's Anthropic key is rejected (401); its code path stays for later.
+    assert not any(model.startswith("claude") for model in AVAILABLE_MODELS)

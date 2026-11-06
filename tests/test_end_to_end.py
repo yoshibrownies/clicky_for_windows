@@ -93,7 +93,8 @@ def test_full_interaction_over_real_network_code(qt_app, fake_worker_url):
     websocket_server = runner.run(start_fake_assemblyai(), timeout=5)
     try:
         websocket_port = websocket_server.sockets[0].getsockname()[1]
-        settings = load_settings({"CLICKY_WORKER_URL": fake_worker_url + "/"})
+        # The Claude /chat contract (hidden from the tray, still supported).
+        settings = load_settings({"CLICKY_WORKER_URL": fake_worker_url + "/", "CLICKY_MODEL": "claude-opus-5-5"})
         services = WorkerServices(settings, assemblyai_websocket_base_url=f"ws://127.0.0.1:{websocket_port}/v3/ws")
         player = FakePlayer()
         controller = CompanionController(

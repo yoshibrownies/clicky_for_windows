@@ -10,7 +10,7 @@ import math
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen, QPolygonF
 
-from clicky.handwriting import _handwriting_font
+from clicky.fonts import mono_font, ui_font
 from clicky.scene import DrawItem, Scene
 
 PIXEL_LIMIT = 10_000.0
@@ -80,10 +80,10 @@ class ScenePainter:
     """Holds the fonts and paints scenes. `focus_point` is where the action is in the last frame painted."""
 
     def __init__(self) -> None:
-        self._hand_font = _handwriting_font(16)
-        self._caption_font = _handwriting_font(17)
-        self._tick_font = QFont("Segoe UI", 8)
-        self._label_font = _handwriting_font(14)
+        self._hand_font = ui_font(14, QFont.Weight.Medium)
+        self._caption_font = ui_font(14, QFont.Weight.Medium)
+        self._tick_font = mono_font(10)
+        self._label_font = ui_font(12, QFont.Weight.Medium)
         self.focus_point: QPointF | None = None
 
     def paint(self, painter: QPainter, area: QRectF, scene: Scene, t: float) -> None:
@@ -239,7 +239,7 @@ class ScenePainter:
             label_width = QFontMetricsF(self._label_font).horizontalAdvance(item.label)
             label_anchor = QPointF((start.x() + end.x()) / 2 - label_width / 2, min(start.y(), end.y()) - 8)
         elif item.kind == "text":
-            font = _handwriting_font(int(max(9, min(40, values.get("size", 15)))))
+            font = ui_font(int(max(9, min(40, values.get("size", 14)))), QFont.Weight.Medium)
             painter.setFont(font)
             painter.setPen(color)
             painter.drawText(QPointF(*mapper.to_pixel(values["x"], values["y"])), item.text)

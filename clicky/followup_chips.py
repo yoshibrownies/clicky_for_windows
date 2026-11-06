@@ -7,10 +7,10 @@ WindowDoesNotAcceptFocus), so clicking a chip leaves your app focused. Clicking 
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QFontMetricsF, QGuiApplication, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QCursor, QFont, QFontMetricsF, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
-from clicky.handwriting import handwriting_font
+from clicky.fonts import ui_font
 from clicky.overlay import exclude_window_from_capture
 
 MAX_CHIPS = 3
@@ -53,7 +53,7 @@ class FollowUpChips(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setMouseTracking(True)
         self.setWindowTitle("Clicky follow-ups")
-        self._font = handwriting_font(17)
+        self._font = ui_font(14, QFont.Weight.Medium)
         self._metrics = QFontMetricsF(self._font)
         self._options: list[str] = []
         self._chip_rects: list[QRectF] = []

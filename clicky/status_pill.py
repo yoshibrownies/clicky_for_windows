@@ -14,6 +14,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter, QPolygonF
 from PySide6.QtWidgets import QWidget
 
+from clicky.fonts import ui_font
 from clicky.overlay import exclude_window_from_capture
 
 PILL_WIDTH = 196
@@ -48,7 +49,7 @@ class StatusPill(QWidget):
         self._idle_since: float | None = None
         self._shown_at = 0.0
         self._audio_level = 0.0
-        self._font = QFont("Segoe UI", 10, QFont.Weight.DemiBold)
+        self._font = ui_font(13, QFont.Weight.DemiBold)
         self._capture_exclusion_applied = False
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.TimerType.CoarseTimer)

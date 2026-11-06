@@ -30,7 +30,8 @@ from PySide6.QtWidgets import QWidget
 from clicky.animation import ease_in_out
 from clicky.diagram import Diagram, layout_diagram, parse_diagram
 from clicky.followup_chips import chips_reserve
-from clicky.handwriting import handwriting_font, typed_characters, wrap_text
+from clicky.fonts import mono_font, ui_font
+from clicky.handwriting import typed_characters, wrap_text
 from clicky.overlay import exclude_window_from_capture
 from clicky.scene import Scene
 from clicky.scene_painter import ScenePainter
@@ -72,11 +73,11 @@ NODE_FILL = QColor(222, 239, 228)
 ARROW_COLOR = QColor(84, 97, 92)
 ANIMATION_PANEL = QColor(255, 255, 255, 130)
 
-# kind -> (font pixel size, bold, line height, typing speed factor)
+# kind -> (font pixel size, weight, line height, typing speed factor). Inter for words, Geist Mono for formulas.
 TEXT_STYLES = {
-    "heading": (28, True, 40, 0.8),
-    "note": (19, False, 30, 1.0),
-    "formula": (25, False, 40, 0.7),
+    "heading": (24, QFont.Weight.DemiBold, 34, 0.8),
+    "note": (16, QFont.Weight.Normal, 26, 1.0),
+    "formula": (19, QFont.Weight.Medium, 32, 0.7),
 }
 
 
@@ -140,10 +141,10 @@ class LessonCard(QWidget):
         self._capture_exclusion_applied = False
         self._last_writing_emit = 0.0
         self._last_writing_point: tuple[int, int] | None = None
-        self._fonts = {kind: self._make_font(size, bold) for kind, (size, bold, _, _) in TEXT_STYLES.items()}
+        self._fonts = {kind: self._make_font(kind, size, weight) for kind, (size, weight, _, _) in TEXT_STYLES.items()}
         self._metrics = {kind: QFontMetricsF(font) for kind, font in self._fonts.items()}
-        self._title_font = handwriting_font(18)
-        self._label_font = handwriting_font(15)
+        self._title_font = ui_font(14, QFont.Weight.DemiBold)
+        self._label_font = ui_font(13, QFont.Weight.Medium)
         self._scene_painter = ScenePainter()
         self.resize(CARD_WIDTH + 2 * SHADOW, self._content_height())
         self._timer = QTimer(self)
@@ -152,10 +153,8 @@ class LessonCard(QWidget):
         self._timer.timeout.connect(self._tick)
 
     @staticmethod
-    def _make_font(pixel_size: int, bold: bool) -> QFont:
-        font = handwriting_font(pixel_size)
-        font.setBold(bold)
-        return font
+    def _make_font(kind: str, pixel_size: int, weight: QFont.Weight) -> QFont:
+        return mono_font(pixel_size, weight) if kind == "formula" else ui_font(pixel_size, weight)
 
     # ----- public API (GUI thread) -----
 

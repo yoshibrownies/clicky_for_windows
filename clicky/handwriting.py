@@ -1,12 +1,8 @@
-"""Handwritten-text helpers shared by Clicky's paper surfaces: font choice, word wrap, typing progress."""
+"""Text helpers shared by the lesson card: word wrap and typing progress (fonts live in fonts.py)."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-
-from PySide6.QtGui import QFont, QFontDatabase
-
-HANDWRITING_FONTS = ("Ink Free", "Segoe Print", "Comic Sans MS")
 
 
 def wrap_text(text: str, measure: Callable[[str], float], max_width: float) -> list[str]:
@@ -37,15 +33,3 @@ def typed_characters(elapsed_seconds: float, characters_per_second: float, total
     if elapsed_seconds <= 0:
         return 0
     return min(total_characters, int(elapsed_seconds * characters_per_second))
-
-
-def handwriting_font(pixel_size: int) -> QFont:
-    available = set(QFontDatabase.families())
-    family = next((name for name in HANDWRITING_FONTS if name in available), "Segoe UI")
-    font = QFont(family)
-    font.setPixelSize(pixel_size)
-    return font
-
-
-# Kept for existing imports.
-_handwriting_font = handwriting_font

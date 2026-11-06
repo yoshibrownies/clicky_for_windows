@@ -28,6 +28,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 from clicky.animation import Flight
+from clicky.fonts import ui_font
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +91,8 @@ class BuddyOverlay(QWidget):
         self.setWindowTitle("Clicky buddy")
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
 
-        self._bubble_font = QFont("Segoe UI", 10)
-        self._label_font = QFont("Segoe UI", 8, QFont.Weight.DemiBold)
+        self._bubble_font = ui_font(13)
+        self._label_font = ui_font(11, QFont.Weight.DemiBold)
         self._capture_exclusion_applied = False
 
         self.companion_state = "idle"

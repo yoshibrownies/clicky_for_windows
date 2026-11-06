@@ -21,6 +21,7 @@ from clicky.audio_capture import MicrophoneStreamer
 from clicky.config import AVAILABLE_MODELS, EFFORT_LEVELS, ConfigError, load_settings
 from clicky.controller import CompanionController, PointTarget
 from clicky.followup_chips import FollowUpChips
+from clicky.fonts import load_fonts
 from clicky.hotkey import VK_ESCAPE, HotkeyParseError, HotkeyPoller, KeyTapWatcher, PushToTalkEvent, parse_hotkey
 from clicky.lesson_card import DEFAULT_LINGER_SECONDS, LessonCard
 from clicky.overlay import BuddyOverlay
@@ -157,6 +158,7 @@ def main() -> int:
     application = QApplication(sys.argv)
     application.setApplicationName("Clicky")
     application.setQuitOnLastWindowClosed(False)
+    load_fonts()  # Inter + Geist Mono, bundled in clicky/fonts
 
     lock_file = QLockFile(
         str(Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.TempLocation)) / "clicky.lock")

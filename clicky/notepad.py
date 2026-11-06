@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import math
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
@@ -18,7 +17,6 @@ from PySide6.QtGui import (
     QColor,
     QCursor,
     QFont,
-    QFontDatabase,
     QFontMetricsF,
     QGuiApplication,
     QPainter,
@@ -30,6 +28,7 @@ from PySide6.QtWidgets import QWidget
 
 from clicky.animation import ease_in_out
 from clicky.diagram import Diagram, layout_diagram, parse_diagram
+from clicky.handwriting import _handwriting_font, typed_characters, wrap_text  # noqa: F401
 from clicky.overlay import exclude_window_from_capture
 
 logger = logging.getLogger(__name__)
@@ -51,7 +50,6 @@ DEFAULT_FADE_SECONDS = 0.6
 CLEAR_FADE_SECONDS = 0.2
 FRAME_INTERVAL_MS = 16
 IDLE_CHECK_INTERVAL_MS = 200
-HANDWRITING_FONTS = ("Ink Free", "Segoe Print", "Comic Sans MS")
 
 PAPER_COLOR = QColor(255, 251, 235)
 RULE_COLOR = QColor(191, 219, 254, 170)
@@ -60,44 +58,6 @@ INK_COLOR = QColor(30, 41, 59)
 NODE_FILL = QColor(219, 234, 254)
 NODE_BORDER = QColor(59, 130, 246)
 ARROW_COLOR = QColor(71, 85, 105)
-
-
-def wrap_text(text: str, measure: Callable[[str], float], max_width: float) -> list[str]:
-    """Greedy word wrap; words longer than a line are split."""
-    lines: list[str] = []
-    current = ""
-    for word in text.split():
-        candidate = f"{current} {word}".strip()
-        if measure(candidate) <= max_width:
-            current = candidate
-            continue
-        if current:
-            lines.append(current)
-        current = ""
-        while measure(word) > max_width and len(word) > 1:
-            cut = len(word)
-            while cut > 1 and measure(word[:cut]) > max_width:
-                cut -= 1
-            lines.append(word[:cut])
-            word = word[cut:]
-        current = word
-    if current:
-        lines.append(current)
-    return lines
-
-
-def typed_characters(elapsed_seconds: float, characters_per_second: float, total_characters: int) -> int:
-    if elapsed_seconds <= 0:
-        return 0
-    return min(total_characters, int(elapsed_seconds * characters_per_second))
-
-
-def _handwriting_font(pixel_size: int) -> QFont:
-    available = set(QFontDatabase.families())
-    family = next((name for name in HANDWRITING_FONTS if name in available), "Segoe UI")
-    font = QFont(family)
-    font.setPixelSize(pixel_size)
-    return font
 
 
 @dataclass

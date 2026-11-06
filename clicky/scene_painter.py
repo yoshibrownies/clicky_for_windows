@@ -10,7 +10,7 @@ import math
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen, QPolygonF
 
-from clicky.notepad import _handwriting_font
+from clicky.handwriting import _handwriting_font
 from clicky.scene import DrawItem, Scene
 
 PIXEL_LIMIT = 10_000.0
@@ -92,7 +92,8 @@ class ScenePainter:
 
     def _plot_rect(self, board: QRectF, scene: Scene) -> QRectF:
         left_margin = 58 if scene.axes else 20
-        bottom_margin = 66 if scene.axes else 44
+        # Room at the bottom for tick labels (axes) and the caption line, only when they exist.
+        bottom_margin = (66 if scene.axes else 14) + (0 if scene.axes or not scene.captions else 30)
         top_margin = 44 if scene.title else 18
         return QRectF(
             board.left() + left_margin,
@@ -137,6 +138,8 @@ class ScenePainter:
             painter.restore()
 
     def _paint_grid_and_axes(self, painter: QPainter, plot: QRectF, mapper: WorldMapper, scene: Scene) -> None:
+        if not scene.axes:
+            return  # a free-form scene (no axes) reads more like a sketch without grid lines
         x_min, x_max, y_min, y_max = scene.world
         x_ticks, y_ticks = nice_ticks(x_min, x_max), nice_ticks(y_min, y_max)
         painter.setPen(QPen(GRID_COLOR, 1))
@@ -232,7 +235,9 @@ class ScenePainter:
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(color)
                 painter.drawPolygon(QPolygonF([end, left, right]))
-            label_anchor = QPointF(end.x() + 6, end.y() - 4)
+            # Label above the middle of the arrow, so it never sits on the arrow itself.
+            label_width = QFontMetricsF(self._label_font).horizontalAdvance(item.label)
+            label_anchor = QPointF((start.x() + end.x()) / 2 - label_width / 2, min(start.y(), end.y()) - 8)
         elif item.kind == "text":
             font = _handwriting_font(int(max(9, min(40, values.get("size", 15)))))
             painter.setFont(font)

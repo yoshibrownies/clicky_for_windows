@@ -482,3 +482,48 @@ def test_card_events_pass_through():
         ("formula", "f"),
         ("followup", "q"),
     ]
+
+
+class CountingServices(FakeServices):
+    def __init__(self, **options) -> None:
+        super().__init__(**options)
+        self.transcription_starts = 0
+
+    async def start_transcription(self, on_transcript_update):
+        self.transcription_starts += 1
+        return await super().start_transcription(on_transcript_update)
+
+
+def test_typed_question_runs_the_answer_without_listening(qt_app, runner):
+    services = CountingServices()
+    controller, player, microphones, recorded = make_controller(runner, services)
+    controller.ask_typed("Explain terminal speed")
+    assert controller.state is CompanionState.PROCESSING
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    assert services.transcription_starts == 0
+    assert microphones == []
+    body = services.request_bodies[0]
+    assert body["messages"][-1]["content"][-1]["text"] == "Explain terminal speed"
+    assert len([block for block in body["messages"][-1]["content"] if block["type"] == "image"]) == 2
+    assert "Explain terminal speed" in recorded["transcripts"]
+    assert player.played == [b"mp3"]
+
+
+def test_typed_question_interrupts_a_reply_in_progress(qt_app, runner):
+    services = CountingServices()
+    controller, player, _, _ = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    stops = player.stop_calls
+    controller.ask_typed("Try a calculation")
+    assert player.stop_calls == stops + 1
+    wait_until(lambda: len(services.request_bodies) == 2 and controller.state is CompanionState.RESPONDING)
+    assert services.request_bodies[1]["messages"][-1]["content"][-1]["text"] == "Try a calculation"
+
+
+def test_blank_typed_question_is_ignored(qt_app, runner):
+    services = CountingServices()
+    controller, _, _, _ = make_controller(runner, services)
+    controller.ask_typed("   ")
+    assert controller.state is CompanionState.IDLE

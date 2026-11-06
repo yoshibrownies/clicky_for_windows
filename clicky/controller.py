@@ -293,6 +293,25 @@ class CompanionController(QObject):
         self._audio_queue = None
         self._set_state(CompanionState.PROCESSING)
 
+    @Slot(str)
+    def ask_typed(self, text: str) -> None:
+        """Answer a question given as text (a follow-up chip): same pipeline, no microphone or transcription."""
+        text = " ".join(text.split())
+        if not text:
+            return
+        self._abort_current_interaction()
+        self._generation += 1
+        generation = self._generation
+        self._set_state(CompanionState.PROCESSING)
+        self.transcript_changed.emit(text)
+        self.reply_text_changed.emit("")
+        try:
+            screen_captures = tuple(self._capture_screens())
+        except Exception:
+            logger.exception("Screen capture failed; continuing without screenshots")
+            screen_captures = ()
+        self._interaction_future = self._runner.submit(self._run_typed_interaction(generation, text, screen_captures))
+
     @Slot()
     def handle_push_to_talk_cancelled(self) -> None:
         if self.state is CompanionState.LISTENING:
@@ -336,46 +355,7 @@ class CompanionController(QObject):
                 return
             self._partial_transcript.emit(generation, transcript)
 
-            build_request_body = (
-                build_openai_chat_request_body if is_openai_model(self.model) else build_chat_request_body
-            )
-            request_body = build_request_body(
-                model=self.model,
-                effort=self.effort,
-                system_prompt=COMPANION_SYSTEM_PROMPT,
-                history_messages=self.history.as_messages(),
-                screenshots=[(capture.jpeg_bytes, capture.label) for capture in screen_captures],
-                user_transcript=transcript,
-            )
-            reply_text = ""
-            stop_reason: str | None = None
-            async for stream_event in self._services.stream_reply(request_body):
-                if isinstance(stream_event, TextDelta):
-                    reply_text += stream_event.text
-                    self._partial_reply.emit(generation, visible_reply_text(reply_text))
-                elif isinstance(stream_event, StreamFinished):
-                    stop_reason = stream_event.stop_reason
-
-            visual_events: tuple[ScreenVisualEvent, ...] = ()
-            if stop_reason == "refusal":
-                spoken_text, point_target = REFUSAL_SPOKEN_REPLY, None
-            else:
-                spoken_text, point_target, visual_events = build_visual_plan(reply_text, screen_captures)
-                self.history.add(transcript, reply_text)
-            if not spoken_text:
-                spoken_text = "here you go." if visual_events else "hmm, i don't have anything to say to that."
-
-            speech_audio: bytes | None = None
-            speech_error: str | None = None
-            try:
-                speech_audio = await self._services.fetch_speech(spoken_text)
-            except Exception as tts_error:
-                logger.warning("Text-to-speech failed: %s", tts_error)
-                speech_error = str(tts_error)
-
-            self._reply_ready.emit(
-                CompanionReply(generation, spoken_text, point_target, speech_audio, speech_error, visual_events)
-            )
+            await self._respond(generation, transcript, screen_captures)
         except asyncio.CancelledError:
             raise
         except Exception as interaction_error:
@@ -384,6 +364,58 @@ class CompanionController(QObject):
         finally:
             if session is not None:
                 await asyncio.shield(_cancel_quietly(session))
+
+    async def _respond(self, generation: int, transcript: str, screen_captures: Sequence[ScreenCapture]) -> None:
+        """Ask the model, speak and show the answer. Shared by spoken and typed (follow-up chip) questions."""
+        build_request_body = build_openai_chat_request_body if is_openai_model(self.model) else build_chat_request_body
+        request_body = build_request_body(
+            model=self.model,
+            effort=self.effort,
+            system_prompt=COMPANION_SYSTEM_PROMPT,
+            history_messages=self.history.as_messages(),
+            screenshots=[(capture.jpeg_bytes, capture.label) for capture in screen_captures],
+            user_transcript=transcript,
+        )
+        reply_text = ""
+        stop_reason: str | None = None
+        async for stream_event in self._services.stream_reply(request_body):
+            if isinstance(stream_event, TextDelta):
+                reply_text += stream_event.text
+                self._partial_reply.emit(generation, visible_reply_text(reply_text))
+            elif isinstance(stream_event, StreamFinished):
+                stop_reason = stream_event.stop_reason
+
+        visual_events: tuple[ScreenVisualEvent, ...] = ()
+        if stop_reason == "refusal":
+            spoken_text, point_target = REFUSAL_SPOKEN_REPLY, None
+        else:
+            spoken_text, point_target, visual_events = build_visual_plan(reply_text, screen_captures)
+            self.history.add(transcript, reply_text)
+        if not spoken_text:
+            spoken_text = "here you go." if visual_events else "hmm, i don't have anything to say to that."
+
+        speech_audio: bytes | None = None
+        speech_error: str | None = None
+        try:
+            speech_audio = await self._services.fetch_speech(spoken_text)
+        except Exception as tts_error:
+            logger.warning("Text-to-speech failed: %s", tts_error)
+            speech_error = str(tts_error)
+
+        self._reply_ready.emit(
+            CompanionReply(generation, spoken_text, point_target, speech_audio, speech_error, visual_events)
+        )
+
+    async def _run_typed_interaction(
+        self, generation: int, text: str, screen_captures: tuple[ScreenCapture, ...]
+    ) -> None:
+        try:
+            await self._respond(generation, text, screen_captures)
+        except asyncio.CancelledError:
+            raise
+        except Exception as interaction_error:
+            logger.exception("Typed interaction failed")
+            self._interaction_failed.emit(generation, str(interaction_error))
 
     # ----- results back on the GUI thread -----
 

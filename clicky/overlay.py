@@ -39,6 +39,7 @@ FOLLOW_SMOOTHING = 0.32
 HOLD_AT_TARGET_SECONDS = 3.0
 NOTICE_LINGER_SECONDS = 5.0
 NOTICE_READING_CHARACTERS_PER_SECOND = 15.0  # long notices stay up long enough to read
+NOTICE_MAX_LINGER_SECONDS = 30.0  # the bubble shows at most ~12 lines, so longer is just clutter
 IDLE_FADE_DELAY_SECONDS = 1.0
 FRAME_INTERVAL_MS = 16
 HIDDEN_IDLE_INTERVAL_MS = 120
@@ -125,7 +126,7 @@ class BuddyOverlay(QWidget):
         self.always_visible = True
         self._audio_level = 0.0
         self._bubble: _Bubble | None = None
-        self._wrapped_bubble_cache: tuple[str, str] = ("", "")
+        self._wrapped_bubble_cache: tuple[tuple[str, str], str] = (("", ""), "")
 
         cursor_position = QCursor.pos()
         self._buddy_position = (
@@ -201,7 +202,9 @@ class BuddyOverlay(QWidget):
     def show_notice(self, text: str) -> None:
         if text:
             self._wake()
-            linger = max(NOTICE_LINGER_SECONDS, len(text) / NOTICE_READING_CHARACTERS_PER_SECOND)
+            linger = min(
+                NOTICE_MAX_LINGER_SECONDS, max(NOTICE_LINGER_SECONDS, len(text) / NOTICE_READING_CHARACTERS_PER_SECOND)
+            )
             self._bubble = _Bubble(text, "notice", time.monotonic() + linger)
 
     def set_always_visible(self, always_visible: bool) -> None:
@@ -425,9 +428,10 @@ class BuddyOverlay(QWidget):
         painter.setFont(self._label_font)
         painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, self._point_label)
 
-    def _fit_bubble_text(self, text: str, max_height: float) -> str:
-        """Keep the most recent words when a long reply doesn't fit (cached per text)."""
-        if self._wrapped_bubble_cache[0] == text:
+    def _fit_bubble_text(self, text: str, max_height: float, keep: str = "end") -> str:
+        """Shorten text that doesn't fit: keep="end" keeps the newest words (your live transcript), keep="start"
+        keeps the beginning (a notice reads from its start). Cached per text."""
+        if self._wrapped_bubble_cache[0] == (text, keep):
             return self._wrapped_bubble_cache[1]
         metrics = QFontMetricsF(self._bubble_font)
         flags = int(Qt.TextFlag.TextWordWrap)
@@ -439,14 +443,17 @@ class BuddyOverlay(QWidget):
             and dropped_word_count < len(words) - 1
         ):
             dropped_word_count += max(1, len(words) // 20)
-            fitted_text = "… " + " ".join(words[dropped_word_count:])
-        self._wrapped_bubble_cache = (text, fitted_text)
+            if keep == "start":
+                fitted_text = " ".join(words[: len(words) - dropped_word_count]) + " …"
+            else:
+                fitted_text = "… " + " ".join(words[dropped_word_count:])
+        self._wrapped_bubble_cache = ((text, keep), fitted_text)
         return fitted_text
 
     def _paint_bubble(self, painter: QPainter, anchor_x: float, anchor_y: float, bubble: _Bubble) -> None:
         padding = 11.0
         max_text_height = WINDOW_HEIGHT - EDGE_MARGIN - 40 - padding * 2
-        text = self._fit_bubble_text(bubble.text, max_text_height)
+        text = self._fit_bubble_text(bubble.text, max_text_height, keep="start" if bubble.kind == "notice" else "end")
         metrics = QFontMetricsF(self._bubble_font)
         flags = int(Qt.TextFlag.TextWordWrap)
         text_rect = metrics.boundingRect(QRectF(0, 0, BUBBLE_MAX_TEXT_WIDTH, 10_000), flags, text)

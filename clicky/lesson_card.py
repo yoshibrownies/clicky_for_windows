@@ -1,9 +1,9 @@
 """The lesson card: one soft-green card where Clicky writes its explanation while it talks.
 
-A title bar, then blocks in the order the model wrote them: a big handwritten heading, notes, formulas, a
+A title bar, then blocks in the order the model wrote them: a big heading, notes, formulas, a
 boxes-and-arrows diagram and an inline animation. Text types out, diagrams pop in box by box, animations play.
-`writing_point` reports where the "pen" is so the buddy cursor can follow it. Click-through, always on top,
-excluded from screen capture; it lingers after the reply, then fades. The timer runs only while something moves.
+`writing_point` reports where the "pen" is so the buddy cursor can follow it. Always on top, excluded from screen
+capture; it lingers after the reply, then fades. The timer runs only while something moves.
 You can drag it by its title bar, close it with the x, and scroll it with the mouse wheel; it never takes keyboard
 focus, so the app you're working in keeps it.
 """

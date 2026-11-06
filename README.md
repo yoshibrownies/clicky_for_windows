@@ -60,7 +60,7 @@ release.
 
 ## What it does while it talks
 Clicky explains properly (several sentences, an intuition, an example) and shows you as it goes:
-- **A lesson card** slides in at the side of your screen: a soft-green card with a title bar, a big handwritten
+- **A lesson card** slides in at the side of your screen: a soft-green card with a title bar, a big
   question, then notes, formulas, a boxes-and-arrows diagram and a little animation, written in order while it speaks.
 - **The green cursor follows the pen** while the card is being written, then goes back to your mouse.
 - **Animations** play inside the card: a ball speeding up with its velocity arrow growing, a graph plotting itself,
@@ -69,11 +69,14 @@ Clicky explains properly (several sentences, an intuition, an example) and shows
 - **Animated underlines and circles** mark the exact words or buttons on your real screen, and the buddy can fly
   over to point.
 - **Follow-up chips** ("Explain terminal speed", "Try a calculation") appear under the card when it finishes. Click
-  one and Clicky answers it straight away, no talking needed. They're the only part of Clicky you can click.
+  one and Clicky answers it straight away, no talking needed.
+- **Move the card** by dragging its title bar, close it with **x**, and scroll back through it with the mouse wheel.
+  If Clicky marks something under the card, the card glides out of the way.
 - **A status pill** at the top of the screen shows Listening, Thinking or Speaking while it works.
 - **Clear it all** any time with **Esc** or **Clear screen** in the tray menu.
 
-Everything else is click-through and stays out of Clicky's own screenshots.
+The card and chips never take keyboard focus. Everything else is click-through, and all of it stays out of Clicky's
+own screenshots.
 
 ## Using it
 | You do | Clicky does |
@@ -110,7 +113,7 @@ ElevenLabs usage. Check your dashboards after the first few days.
 | `clicky/overlay.py` | The buddy: click-through, always on top, **excluded from screen capture** so Claude never sees it |
 | `clicky/visuals.py`, `timeline.py`, `visual_director.py` | Parse the model's inline `[UNDERLINE]`/`[CIRCLE]`/`[NOTE]`/`[DIAGRAM]`/`[POINT]` tags and fire each at its moment in the speech |
 | `clicky/annotations.py` | Hand-drawn animated underlines and circles, one transparent layer per monitor |
-| `clicky/lesson_card.py`, `handwriting.py`, `diagram.py` | The soft-green lesson card: handwriting, notes, formulas, diagrams, inline animations |
+| `clicky/lesson_card.py`, `handwriting.py`, `diagram.py` | The soft-green lesson card (Inter + Geist Mono): notes, formulas, diagrams, inline animations |
 | `clicky/scene.py`, `expressions.py`, `scene_painter.py` | The animation language: JSON scenes with safe formulas and keyframes |
 | `clicky/followup_chips.py`, `status_pill.py` | Clickable follow-up questions; the Listening/Thinking/Speaking pill |
 | `clicky/tray.py`, `playback.py`, `app.py` | Tray menu, MP3 playback, wiring |

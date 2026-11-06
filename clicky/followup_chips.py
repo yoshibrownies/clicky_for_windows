@@ -1,6 +1,6 @@
 """Follow-up chips: green pill buttons under the lesson card after an answer ("Explain terminal speed").
 
-This is the one part of Clicky that takes clicks. It never takes keyboard focus (WA_ShowWithoutActivating +
+Like the lesson card it takes clicks but never keyboard focus (WA_ShowWithoutActivating +
 WindowDoesNotAcceptFocus), so clicking a chip leaves your app focused. Clicking one emits `chosen(text)` and hides.
 """
 

@@ -29,7 +29,7 @@ from clicky.openai_client import build_openai_chat_request_body
 from clicky.pointing import parse_point_tag
 from clicky.prompts import COMPANION_SYSTEM_PROMPT, REFUSAL_SPOKEN_REPLY
 from clicky.screens import ScreenCapture, map_image_point_to_screen
-from clicky.visuals import parse_visual_reply, visible_text
+from clicky.visuals import extract_scene_blocks, parse_visual_reply, visible_text
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +205,6 @@ class CompanionController(QObject):
     _interaction_failed = Signal(int, str)
     _nothing_heard = Signal(int)
     _processing_started = Signal(int)
-    _partial_reply = Signal(int, str)
     _partial_transcript = Signal(int, str)
 
     def __init__(
@@ -240,7 +239,6 @@ class CompanionController(QObject):
         self._interaction_failed.connect(self._on_interaction_failed)
         self._nothing_heard.connect(self._on_nothing_heard)
         self._processing_started.connect(self._on_processing_started)
-        self._partial_reply.connect(self._on_partial_reply)
         self._partial_transcript.connect(self._on_partial_transcript)
 
     # ----- GUI-thread entry points -----
@@ -381,7 +379,6 @@ class CompanionController(QObject):
         async for stream_event in self._services.stream_reply(request_body):
             if isinstance(stream_event, TextDelta):
                 reply_text += stream_event.text
-                self._partial_reply.emit(generation, visible_reply_text(reply_text))
             elif isinstance(stream_event, StreamFinished):
                 stop_reason = stream_event.stop_reason
 
@@ -390,7 +387,6 @@ class CompanionController(QObject):
             spoken_text, point_target = REFUSAL_SPOKEN_REPLY, None
         else:
             spoken_text, point_target, visual_events = build_visual_plan(reply_text, screen_captures)
-            self.history.add(transcript, reply_text)
         if not spoken_text:
             spoken_text = "here you go." if visual_events else "hmm, i don't have anything to say to that."
 
@@ -401,6 +397,10 @@ class CompanionController(QObject):
         except Exception as tts_error:
             logger.warning("Text-to-speech failed: %s", tts_error)
             speech_error = str(tts_error)
+        # Remembered only now: an answer cut off before it was spoken never happened as far as you know. The scene
+        # JSON is left out (it's big, and the [ANIMATE:name] tag already says an animation was shown).
+        if stop_reason != "refusal":
+            self.history.add(transcript, extract_scene_blocks(reply_text)[0])
 
         self._reply_ready.emit(
             CompanionReply(generation, spoken_text, point_target, speech_audio, speech_error, visual_events)
@@ -431,11 +431,6 @@ class CompanionController(QObject):
     def _on_partial_transcript(self, generation: int, transcript: str) -> None:
         if self._is_current(generation):
             self.transcript_changed.emit(transcript)
-
-    @Slot(int, str)
-    def _on_partial_reply(self, generation: int, visible_text: str) -> None:
-        if self._is_current(generation):
-            self.reply_text_changed.emit(visible_text)
 
     @Slot(int)
     def _on_nothing_heard(self, generation: int) -> None:

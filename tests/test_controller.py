@@ -538,3 +538,47 @@ def test_tts_failure_shows_the_answer_as_text(qt_app, runner):
     notice = recorded["notices"][-1]
     assert "couldn't play the voice" in notice
     assert len(notice) > len("couldn't play the voice: Text-to-speech failed (401)") + 5  # the answer is in it
+
+
+def test_streaming_does_not_reparse_the_whole_reply_on_every_chunk(qt_app, runner, monkeypatch):
+    import clicky.controller as controller_module
+
+    calls = []
+    monkeypatch.setattr(controller_module, "visible_reply_text", lambda text: calls.append(text) or text)
+    services = FakeServices(reply_chunks=tuple(f"word{n} " for n in range(50)))
+    controller, player, _, recorded = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: player.played)
+    assert len(calls) == 0  # nothing shows the partial reply any more
+
+
+def test_history_keeps_the_words_not_the_scene_json(qt_app, runner):
+    scene = '<scene name="drop">{"duration": 3, "world": {"x": [0, 1], "y": [0, 1]}, "objects": []}</scene>'
+    services = FakeServices(reply_chunks=("watch it fall. [ANIMATE:drop] [NOTE:gravity] ", scene))
+    controller, player, _, _ = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: player.played)
+    remembered = controller.history.as_messages()[-1]["content"]
+    assert "watch it fall." in remembered
+    assert "<scene" not in remembered and '"objects"' not in remembered
+    assert "[ANIMATE:drop]" in remembered  # it still knows it showed an animation
+
+
+def test_an_answer_interrupted_before_it_was_spoken_is_not_remembered(qt_app, runner):
+    class SlowSpeech(FakeServices):
+        async def fetch_speech(self, text):
+            self.spoken.append(text)
+            await asyncio.sleep(5)
+            return b"mp3"
+
+    services = SlowSpeech()
+    controller, player, _, _ = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: services.spoken)  # the reply text is in; the voice is still loading
+    controller.handle_push_to_talk_pressed()  # talk over it
+    controller.handle_push_to_talk_cancelled()
+    wait_until(lambda: runner.in_flight_count == 0)
+    assert len(controller.history) == 0

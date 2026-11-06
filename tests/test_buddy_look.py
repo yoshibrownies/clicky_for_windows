@@ -105,3 +105,16 @@ def test_long_notices_stay_up_long_enough_to_read(qt_app):
         assert long_left >= 15
     finally:
         overlay.close()
+
+
+def test_a_long_notice_keeps_its_beginning(qt_app):
+    overlay = BuddyOverlay()
+    try:
+        answer = "couldn't play the voice: tts failed. here's my answer: " + "this sentence explains a thing. " * 40
+        fitted = overlay._fit_bubble_text(answer, 200, keep="start")
+        assert fitted.startswith("couldn't play the voice")
+        assert fitted.endswith("…")
+        transcript = overlay._fit_bubble_text("word " * 300 + "LAST", 200, keep="end")
+        assert transcript.endswith("LAST")  # your own words keep their newest part
+    finally:
+        overlay.close()

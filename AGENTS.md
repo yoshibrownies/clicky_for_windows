@@ -20,12 +20,14 @@ Python 3.13 + PySide6 port of farzaa/clicky. Read `docs/design.md` before changi
 - Names: descriptive over short (upstream convention). Type hints on public functions.
 - Branches `feat/…` / `fix/…`; conventional commits; never commit to `main` directly.
 - Visual explanations: the prompt (`prompts.py`) teaches inline tags; `visuals.py` limits (MAX_*) must match the
-  prompt's stated limits. Every overlay window (buddy, annotation layer, lesson card, status pill) must stay click-through,
-  capture-excluded, and run its timer only while something animates. Design: `docs/superpowers/specs/2026-11-05-visual-explanations-design.md`.
+  prompt's stated limits. Every overlay window (buddy, annotation layer, status pill) must stay click-through; the lesson
+  card and follow-up chips take the mouse but never keyboard focus. All are capture-excluded and run timers only while
+  something animates. Design: `docs/superpowers/specs/2026-11-05-visual-explanations-design.md`.
 - Animations: the model writes `[ANIMATE:name]` plus a `<scene name="name">{json}</scene>` block (`visuals.py`).
   Formulas go ONLY through `expressions.compile_formula` (whitelisted recursive-descent parser) — never `eval`/`exec`.
   Every scene example in `prompts.py` must parse (tested). Design: `docs/superpowers/specs/2026-11-06-animations-and-clear-design.md`.
 - Clearing: Esc (`KeyTapWatcher`) and tray "Clear screen" call `build_clear_controls` in `app.py`; speech keeps playing.
-- Lesson card (`lesson_card.py`) replaced the notepad and whiteboard. Follow-up chips (`followup_chips.py`) are the
-  ONLY clickable window; they must never take keyboard focus. Typed questions go through `CompanionController.ask_typed`.
+- Lesson card (`lesson_card.py`) replaced the notepad and whiteboard. Follow-up chips (`followup_chips.py`) and the card
+  (drag by title bar, x to close, wheel to scroll) are the only clickable windows; they must never take keyboard focus.
+  The card glides away from screen marks (`LessonCard.avoid`). Design: `docs/superpowers/specs/2026-11-06-movable-card-design.md`. Typed questions go through `CompanionController.ask_typed`.
   Design: `docs/superpowers/specs/2026-11-06-lesson-card-design.md`.

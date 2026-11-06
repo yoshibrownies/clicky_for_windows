@@ -35,3 +35,39 @@ def test_chips_never_take_keyboard_focus_and_hide(qt_app):
         assert not chips.isVisible()
     finally:
         chips.close()
+
+
+def test_chips_place_themselves_using_the_screen_under_the_card(qt_app, monkeypatch):
+    from clicky import followup_chips
+
+    class TallScreen:
+        def availableGeometry(self):  # noqa: N802 (mirrors Qt)
+            return QRect(2000, 0, 1000, 2000)
+
+    monkeypatch.setattr(followup_chips, "_screen_for", lambda rect: TallScreen(), raising=False)
+    chips = FollowUpChips()
+    chips.show = lambda: None
+    try:
+        below = QRect(2500, 56, 420, 700)  # on the 800 px test screen the chips would not fit below
+        chips.show_options(["Go deeper", "Try one"], below=below)
+        assert chips.y() == below.bottom() + 8  # plenty of room under the card on that screen
+    finally:
+        chips.close()
+
+
+def test_chips_can_hide_themselves_after_a_while(qt_app):
+    import time
+
+    from PySide6.QtWidgets import QApplication
+
+    chips = FollowUpChips()
+    try:
+        chips.show_options(["Go deeper"], below=QRect(0, 0, 400, 300), hide_after=0.1)
+        assert chips.isVisible()
+        deadline = time.monotonic() + 0.5
+        while time.monotonic() < deadline:
+            QApplication.processEvents()
+            time.sleep(0.005)
+        assert not chips.isVisible()
+    finally:
+        chips.close()

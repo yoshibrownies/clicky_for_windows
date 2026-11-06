@@ -104,7 +104,7 @@ def test_height_grows_then_caps_and_scrolls(qt_app):
         for index in range(12):
             card.add_note(f"note {index} that is long enough to wrap onto a second line on the card")
         assert card.height() <= 480
-        assert card.scroll_offset() > 0
+        assert card.scroll_offset(time.monotonic() + 60) > 0  # once everything is written, it scrolls
     finally:
         card.close()
 
@@ -136,5 +136,77 @@ def test_disabled_card_ignores_everything(qt_app):
         card.play_animation(tiny_scene())
         assert not card.isVisible()
         assert card.content_blocks() == []
+    finally:
+        card.close()
+
+
+def test_pen_and_scroll_follow_written_content_not_queued_blocks(qt_app):
+    from clicky.lesson_card import SHADOW, TITLE_BAR_HEIGHT
+
+    card = make_card(max_height=400, characters_per_second=40)
+    try:
+        card.add_heading("What slows you down?")
+        for index in range(8):
+            card.add_note(f"note number {index} about drag")
+        card.add_formula("F = 1/2 rho C A v^2")
+        pump(0.05)
+        assert card.scroll_offset() == 0  # only the heading has started: nothing to scroll past yet
+        pen = card._pen_position(time.monotonic())
+        assert pen is not None
+        assert SHADOW + TITLE_BAR_HEIGHT <= pen.y() <= card.height() - SHADOW
+    finally:
+        card.close()
+
+
+def test_pen_prefers_new_writing_over_a_playing_animation(qt_app):
+    card = make_card(characters_per_second=20)
+    try:
+        card.play_animation(tiny_scene(duration=6.0))
+        card.add_note("the ball keeps rolling along")
+        pump(0.9)  # the animation is still playing; the note started typing at 0.6 s
+        pen = card._pen_position(time.monotonic())
+        assert pen is not None
+        note_top = card._block_tops()[1]
+        assert pen.y() >= note_top
+    finally:
+        card.close()
+
+
+def test_animation_alone_still_gives_the_pen_a_place(qt_app):
+    card = make_card()
+    try:
+        card.play_animation(tiny_scene(duration=6.0))  # never painted here, so the scene has no focus point
+        pump(0.1)
+        assert card._pen_position(time.monotonic()) is not None
+    finally:
+        card.close()
+
+
+def test_card_emits_faded_when_it_goes_away(qt_app):
+    card = LessonCard(characters_per_second=400, linger_seconds=0.1, fade_seconds=0.1)
+    faded = []
+    card.faded.connect(lambda: faded.append(True))
+    try:
+        card.add_note("hello")
+        pump(0.1)
+        card.finish()
+        pump(0.5)
+        assert not card.isVisible()
+        assert faded
+    finally:
+        card.close()
+
+
+def test_height_cap_leaves_room_for_the_follow_up_chips(qt_app):
+    from PySide6.QtGui import QGuiApplication
+
+    from clicky.followup_chips import CHIP_GAP, CHIP_HEIGHT, MAX_CHIPS
+    from clicky.followup_chips import SHADOW as CHIP_SHADOW
+
+    card = LessonCard()
+    try:
+        available = QGuiApplication.primaryScreen().availableGeometry()
+        chips_height = 2 * CHIP_SHADOW + MAX_CHIPS * CHIP_HEIGHT + (MAX_CHIPS - 1) * CHIP_GAP
+        assert 56 + card._height_cap() + 8 + chips_height <= available.height()
     finally:
         card.close()

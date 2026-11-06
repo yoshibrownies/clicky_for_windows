@@ -29,6 +29,7 @@ from PySide6.QtWidgets import QWidget
 
 from clicky.animation import ease_in_out
 from clicky.diagram import Diagram, layout_diagram, parse_diagram
+from clicky.followup_chips import chips_reserve
 from clicky.handwriting import handwriting_font, typed_characters, wrap_text
 from clicky.overlay import exclude_window_from_capture
 from clicky.scene import Scene
@@ -37,6 +38,7 @@ from clicky.scene_painter import ScenePainter
 logger = logging.getLogger(__name__)
 
 DEFAULT_TITLE = "clicky's notes"
+DOCK_TOP_MARGIN = 56
 CARD_WIDTH = 420
 SHADOW = 12
 TITLE_BAR_HEIGHT = 40
@@ -104,6 +106,7 @@ class _Block:
 
 class LessonCard(QWidget):
     writing_point = Signal(object)  # QPoint, global: where the pen is right now
+    faded = Signal()  # the card went away (faded out or cleared)
 
     def __init__(
         self,
@@ -236,9 +239,16 @@ class LessonCard(QWidget):
         else:
             self._reset()
 
-    def scroll_offset(self) -> float:
+    def scroll_offset(self, now: float | None = None) -> float:
+        """How far the content is scrolled up. Only blocks that have started count, so the newest written line
+        stays at the bottom of the card and queued (unwritten) blocks never push it off the top."""
+        now = time.monotonic() if now is None else now
+        started = [block for block in self._blocks if block.starts_at <= now]
+        if not started:
+            return 0.0
+        written = sum(block.height for block in started) + BLOCK_GAP * (len(started) - 1)
         inner_visible = self.height() - 2 * SHADOW - TITLE_BAR_HEIGHT - PADDING_TOP - PADDING_BOTTOM
-        return max(0.0, self._blocks_height() - inner_visible)
+        return max(0.0, written - inner_visible)
 
     # ----- building -----
 
@@ -284,7 +294,7 @@ class LessonCard(QWidget):
         if screen is None:
             return
         available = screen.availableGeometry()
-        self.move(available.right() - self.width() - 16, available.top() + 56)
+        self.move(available.right() - self.width() - 16, available.top() + DOCK_TOP_MARGIN)
 
     def _blocks_height(self) -> float:
         if not self._blocks:
@@ -295,7 +305,11 @@ class LessonCard(QWidget):
         if self._max_height_override is not None:
             return self._max_height_override
         screen = QGuiApplication.screenAt(self.geometry().center()) or QGuiApplication.primaryScreen()
-        return int(screen.availableGeometry().height() * 0.88) if screen else 900
+        if screen is None:
+            return 900
+        available_height = screen.availableGeometry().height()
+        # Leave room under the card for the follow-up chips, so they never cover the newest notes.
+        return int(min(available_height * 0.88, available_height - DOCK_TOP_MARGIN - chips_reserve()))
 
     def _content_height(self) -> int:
         height = 2 * SHADOW + TITLE_BAR_HEIGHT + PADDING_TOP + self._blocks_height() + PADDING_BOTTOM
@@ -309,6 +323,7 @@ class LessonCard(QWidget):
         return max(0.0, 1.0 - (now - self._fade_at) / self._active_fade_seconds)
 
     def _reset(self) -> None:
+        had_content = bool(self._blocks)
         self._blocks = []
         self._title = DEFAULT_TITLE
         self._fade_at = None
@@ -317,6 +332,8 @@ class LessonCard(QWidget):
         if self.isVisible():
             self.hide()
         self.resize(CARD_WIDTH + 2 * SHADOW, self._content_height())
+        if had_content:
+            self.faded.emit()
 
     def _tick(self) -> None:
         now = time.monotonic()
@@ -354,9 +371,9 @@ class LessonCard(QWidget):
     def _paper_rect(self) -> QRectF:
         return QRectF(SHADOW, SHADOW, self.width() - 2 * SHADOW, self.height() - 2 * SHADOW)
 
-    def _block_tops(self) -> list[float]:
+    def _block_tops(self, now: float | None = None) -> list[float]:
         paper = self._paper_rect()
-        y = paper.top() + TITLE_BAR_HEIGHT + PADDING_TOP - self.scroll_offset()
+        y = paper.top() + TITLE_BAR_HEIGHT + PADDING_TOP - self.scroll_offset(now)
         tops = []
         for block in self._blocks:
             tops.append(y)
@@ -371,29 +388,40 @@ class LessonCard(QWidget):
         return typed_characters(now - block.starts_at, self._characters_per_second * speed, len(block.text))
 
     def _pen_position(self, now: float) -> QPointF | None:
-        for block, top in zip(self._blocks, self._block_tops(), strict=False):
-            if not block.is_moving(now) or now < block.starts_at:
+        """Where the pen is: the newest text or diagram still being written, otherwise a playing animation."""
+        started = [
+            (block, top)
+            for block, top in zip(self._blocks, self._block_tops(now), strict=False)
+            if block.starts_at <= now and block.is_moving(now)
+        ]
+        for block, top in reversed(started):
+            if block.progress(now) >= 1.0:
                 continue
             if block.kind in TEXT_STYLES:
-                line_height = TEXT_STYLES[block.kind][2]
-                remaining = self._typed_count(block, now)
-                metrics = self._metrics[block.kind]
-                for index, line in enumerate(block.lines):
-                    visible = line[: max(0, remaining)]
-                    if remaining <= len(line) or index == len(block.lines) - 1:
-                        x = self._text_left(block) + metrics.horizontalAdvance(visible)
-                        return QPointF(x + 4, top + (index + 1) * line_height - 8)
-                    remaining -= len(line) + 1
+                return self._text_pen(block, top, now)
             if block.kind == "diagram" and block.diagram is not None:
                 area = self._diagram_area(top)
                 layout = layout_diagram(block.diagram, area.width(), area.height())
                 shown = min(len(block.diagram.nodes) - 1, int((now - block.starts_at) / NODE_APPEAR_SECONDS))
                 x, y, width, height = layout.boxes[max(0, shown)]
                 return QPointF(area.left() + x + width / 2, area.top() + y + height)
+        for block, top in reversed(started):
             if block.kind == "animation":
-                return self._scene_painter.focus_point
-            return None
+                # The scene's busiest object when it has one (circles, plots), otherwise the panel's middle.
+                return self._scene_painter.focus_point or self._animation_area(top).center()
         return None
+
+    def _text_pen(self, block: _Block, top: float, now: float) -> QPointF:
+        line_height = TEXT_STYLES[block.kind][2]
+        remaining = self._typed_count(block, now)
+        metrics = self._metrics[block.kind]
+        for index, line in enumerate(block.lines):
+            visible = line[: max(0, remaining)]
+            if remaining <= len(line) or index == len(block.lines) - 1:
+                x = self._text_left(block) + metrics.horizontalAdvance(visible)
+                return QPointF(x + 4, top + (index + 1) * line_height - 8)
+            remaining -= len(line) + 1
+        return QPointF(self._text_left(block), top)
 
     def _diagram_area(self, top: float) -> QRectF:
         paper = self._paper_rect()
@@ -440,7 +468,7 @@ class LessonCard(QWidget):
         painter.setClipRect(
             QRectF(paper.left(), paper.top() + TITLE_BAR_HEIGHT, paper.width(), paper.height() - TITLE_BAR_HEIGHT)
         )
-        for block, top in zip(self._blocks, self._block_tops(), strict=False):
+        for block, top in zip(self._blocks, self._block_tops(now), strict=False):
             if now < block.starts_at or top > paper.bottom() or top + block.height < paper.top():
                 continue
             try:

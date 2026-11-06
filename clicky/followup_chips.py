@@ -6,8 +6,8 @@ WindowDoesNotAcceptFocus), so clicking a chip leaves your app focused. Clicking 
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QCursor, QFontMetricsF, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QCursor, QFontMetricsF, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 from clicky.handwriting import handwriting_font
@@ -25,6 +25,16 @@ CHIP_FILL = QColor(208, 234, 216)
 CHIP_FILL_HOVER = QColor(186, 224, 199)
 CHIP_BORDER = QColor(47, 158, 103)
 CHIP_TEXT = QColor(28, 61, 44)
+CARD_GAP = 8
+
+
+def chips_reserve(count: int = MAX_CHIPS) -> int:
+    """Vertical room the chips need under the card (gap, chips and a small bottom margin)."""
+    return CARD_GAP + 2 * SHADOW + count * CHIP_HEIGHT + (count - 1) * CHIP_GAP + 8
+
+
+def _screen_for(rect: QRect):
+    return QGuiApplication.screenAt(rect.center()) or QGuiApplication.primaryScreen()
 
 
 class FollowUpChips(QWidget):
@@ -49,12 +59,19 @@ class FollowUpChips(QWidget):
         self._chip_rects: list[QRectF] = []
         self._hovered = -1
         self._capture_exclusion_applied = False
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.timeout.connect(self.hide_options)
 
     def options(self) -> list[str]:
         return list(self._options)
 
-    def show_options(self, options: list[str], below: QRect) -> None:
-        """Lay the chips out under (or, near the screen bottom, inside the bottom of) the card's rectangle."""
+    def show_options(self, options: list[str], below: QRect, hide_after: float | None = None) -> None:
+        """Lay the chips out under (or, near the screen bottom, inside the bottom of) the card's rectangle.
+
+        `hide_after` (seconds) hides them on their own; used when there is no card whose fade would hide them.
+        """
+        self._hide_timer.stop()
         cleaned = [" ".join(option.split())[:MAX_CHIP_TEXT] for option in options if option and option.strip()]
         self._options = cleaned[:MAX_CHIPS]
         if not self._options:
@@ -70,18 +87,26 @@ class FollowUpChips(QWidget):
             self._chip_rects.append(QRectF(SHADOW + 12, y, chip_width, CHIP_HEIGHT))
             y += CHIP_HEIGHT + CHIP_GAP
         self.resize(QSize(width, int(y - CHIP_GAP + SHADOW)))
-        screen = self.screen()
-        top = below.bottom() + 8
-        if screen is not None and top + self.height() > screen.availableGeometry().bottom():
-            top = below.bottom() - self.height() - 12  # overlap the card's bottom edge rather than fall off-screen
-        self.move(below.left(), top)
+        screen = _screen_for(below)  # the screen the card is on, not wherever this window was last
+        top = below.bottom() + CARD_GAP
+        left = below.left()
+        if screen is not None:
+            available = screen.availableGeometry()
+            if top + self.height() > available.bottom():
+                top = below.bottom() - self.height() - 12  # overlap the card's bottom edge rather than fall off-screen
+            top = max(available.top(), top)
+            left = max(available.left(), min(left, available.right() - self.width()))
+        self.move(left, top)
         self._hovered = -1
         self.show()
         if not self._capture_exclusion_applied:
             self._capture_exclusion_applied = exclude_window_from_capture(int(self.winId()))
         self.update()
+        if hide_after is not None:
+            self._hide_timer.start(int(hide_after * 1000))
 
     def hide_options(self) -> None:
+        self._hide_timer.stop()
         self._options = []
         self._chip_rects = []
         if self.isVisible():

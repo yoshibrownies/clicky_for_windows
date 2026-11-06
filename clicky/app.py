@@ -22,7 +22,7 @@ from clicky.config import AVAILABLE_MODELS, EFFORT_LEVELS, ConfigError, load_set
 from clicky.controller import CompanionController, PointTarget
 from clicky.followup_chips import FollowUpChips
 from clicky.hotkey import VK_ESCAPE, HotkeyParseError, HotkeyPoller, KeyTapWatcher, PushToTalkEvent, parse_hotkey
-from clicky.lesson_card import LessonCard
+from clicky.lesson_card import DEFAULT_LINGER_SECONDS, LessonCard
 from clicky.overlay import BuddyOverlay
 from clicky.playback import SpeechPlayer
 from clicky.scene import parse_scene
@@ -113,6 +113,7 @@ def build_clear_controls(director, annotation_layer, card, chips, overlay):
         card.clear()
         chips.hide_options()
         overlay.dismiss_bubble()
+        overlay.release_guide()  # the pen is gone, so the buddy goes back to the mouse
 
     def something_visible() -> bool:
         return bool(annotation_layer.visible_windows() or card.isVisible() or chips.isVisible() or overlay.has_bubble)
@@ -222,6 +223,11 @@ def main() -> int:
         annotation_layer.finish()
         card.finish()
 
+    def show_followups(options: list[str]) -> None:
+        # With a card, the chips go when it fades. Without one they get the same linger on their own.
+        hide_after = None if card.isVisible() else DEFAULT_LINGER_SECONDS
+        chips.show_options(options, below=chips_anchor(card), hide_after=hide_after)
+
     visual_director = VisualDirector(
         annotate=annotation_layer.add_mark,
         note=card.add_note,
@@ -231,7 +237,7 @@ def main() -> int:
         finish=finish_visuals,
         animate=play_animation,
         card_text=add_card_text,
-        followups=lambda options: chips.show_options(options, below=chips_anchor(card)),
+        followups=show_followups,
     )
 
     controller.state_changed.connect(overlay.set_state)
@@ -268,12 +274,14 @@ def main() -> int:
             chips.hide_options()
 
     card.writing_point.connect(follow_pen)
+    card.faded.connect(chips.hide_options)
     controller.state_changed.connect(on_state_for_pen_and_chips)
     chips.chosen.connect(controller.ask_typed)
 
     tray.model_selected.connect(controller.set_model)
     tray.effort_selected.connect(controller.set_effort)
     tray.notepad_toggled.connect(card.set_enabled)
+    tray.notepad_toggled.connect(lambda enabled: None if enabled else overlay.release_guide())
     tray.always_visible_toggled.connect(overlay.set_always_visible)
     clear_all, something_visible = build_clear_controls(visual_director, annotation_layer, card, chips, overlay)
     tray.clear_requested.connect(clear_all)

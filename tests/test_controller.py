@@ -760,3 +760,95 @@ def test_words_after_a_scene_block_get_the_voice_refetched(qt_app, runner):
     wait_until(lambda: controller.state is CompanionState.RESPONDING)
     assert services.spoken[-1] == "first part. and a late sentence."
     assert player.played == [b"mp3"]
+
+
+# ---------- Windows voice fallback ----------
+
+
+class SpeakingPlayer(FakePlayer):
+    """A player that can also speak text with the Windows voice (like VoiceOutput)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.spoken_texts: list[str] = []
+
+    def speak_text(self, text: str) -> None:
+        self.spoken_texts.append(text)
+
+
+class CountingVoiceServices(FakeServices):
+    def __init__(self, error_message: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.error_message = error_message
+
+    async def fetch_speech(self, text):
+        self.spoken.append(text)
+        raise RuntimeError(self.error_message)
+
+
+QUOTA_ERROR = (
+    'Text-to-speech failed (401): {"detail":{"code":"quota_exceeded","message":"This request exceeds your quota"}}'
+)
+
+
+def controller_with_speaking_player(runner, services):
+    player = SpeakingPlayer()
+    controller = CompanionController(
+        runner=runner,
+        services=services,
+        microphone_factory=FakeMicrophone,
+        capture_screens=lambda: [PRIMARY],
+        player=player,
+        model="m",
+        effort="low",
+    )
+    notices: list[str] = []
+    controller.notice.connect(notices.append)
+    return controller, player, notices
+
+
+def ask(controller):
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+
+
+def test_a_failed_voice_falls_back_to_speaking_the_text(qt_app, runner):
+    services = CountingVoiceServices(QUOTA_ERROR)
+    controller, player, notices = controller_with_speaking_player(runner, services)
+    ask(controller)
+    wait_until(lambda: player.spoken_texts)
+    assert player.spoken_texts == ["click save."]
+    assert controller.state is CompanionState.RESPONDING and notices == []
+    controller.handle_playback_finished()
+    assert controller.history.as_messages()[-1]["content"].startswith("click save.")
+
+
+def test_after_a_quota_error_elevenlabs_is_not_asked_again(qt_app, runner):
+    services = CountingVoiceServices(QUOTA_ERROR)
+    controller, player, _ = controller_with_speaking_player(runner, services)
+    ask(controller)
+    wait_until(lambda: len(player.spoken_texts) == 1)
+    controller.handle_playback_finished()
+    ask(controller)
+    wait_until(lambda: len(player.spoken_texts) == 2)
+    assert len(services.spoken) == 1  # the second answer went straight to the Windows voice
+
+
+def test_other_voice_errors_still_retry_elevenlabs(qt_app, runner):
+    services = CountingVoiceServices("Couldn't reach the Clicky Worker: timed out")
+    controller, player, _ = controller_with_speaking_player(runner, services)
+    for expected in (1, 2):
+        ask(controller)
+        wait_until(lambda expected=expected: len(player.spoken_texts) == expected)
+        controller.handle_playback_finished()
+    assert len(services.spoken) == 2
+
+
+def test_if_the_windows_voice_fails_too_the_answer_is_shown(qt_app, runner):
+    services = CountingVoiceServices(QUOTA_ERROR)
+    controller, player, notices = controller_with_speaking_player(runner, services)
+    ask(controller)
+    wait_until(lambda: player.spoken_texts)
+    controller.handle_voice_failed("no windows voice is available")
+    assert controller.state is CompanionState.IDLE
+    assert notices and "click save." in notices[-1]

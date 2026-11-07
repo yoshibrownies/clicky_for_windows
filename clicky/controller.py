@@ -89,6 +89,10 @@ class VisualPlan:
     has_audio: bool
 
 
+QUOTA_EXCEEDED_CODE = "quota_exceeded"  # ElevenLabs' error code when the monthly credits are used up
+ELEVENLABS_QUOTA_USED_UP = "elevenlabs credits are used up"
+
+
 @dataclass(frozen=True)
 class CompanionReply:
     generation: int
@@ -240,6 +244,10 @@ class CompanionController(QObject):
         # The reply being spoken, remembered only once heard: in full, or up to where you cut it off.
         self._speaking_reply: tuple[str, str] | None = None  # (transcript, remembered_text)
         self._heard_fraction = 0.0
+        # After ElevenLabs says the credits are used up, don't ask again until Clicky restarts (the Windows voice
+        # speaks instead); other voice errors retry on the next answer.
+        self._skip_elevenlabs = False
+        self._fallback_text = ""  # what the Windows voice is saying, shown as text if it fails too
 
         self._reply_ready.connect(self._on_reply_ready)
         self._interaction_failed.connect(self._on_interaction_failed)
@@ -337,6 +345,17 @@ class CompanionController(QObject):
         self._speaking_reply = None
         self.history.clear()
 
+    @Slot(str)
+    def handle_voice_failed(self, message: str) -> None:
+        """The Windows voice couldn't speak either: show the answer as text, as when there was no voice at all."""
+        if self.state is not CompanionState.RESPONDING:
+            return
+        logger.warning("Windows voice failed: %s", message)
+        self._remember_heard(1.0)  # shown in full
+        self._set_state(CompanionState.IDLE)
+        if self._fallback_text:
+            self.notice.emit(self._fallback_text)
+
     @Slot(float)
     def handle_playback_progress(self, fraction: float) -> None:
         self._heard_fraction = max(self._heard_fraction, fraction)
@@ -410,7 +429,7 @@ class CompanionController(QObject):
             async for stream_event in self._services.stream_reply(request_body):
                 if isinstance(stream_event, TextDelta):
                     reply_text += stream_event.text
-                    if early_speech is None and "<scene" in reply_text.lower():
+                    if early_speech is None and not self._skip_elevenlabs and "<scene" in reply_text.lower():
                         early_text = build_visual_plan(reply_text, screen_captures)[0]
                         if early_text:
                             early_speech = asyncio.ensure_future(self._services.fetch_speech(early_text))
@@ -437,6 +456,8 @@ class CompanionController(QObject):
         try:
             if early_speech is not None:
                 speech_audio = await early_speech
+            elif self._skip_elevenlabs:
+                speech_error = ELEVENLABS_QUOTA_USED_UP
             else:
                 speech_audio = await self._services.fetch_speech(spoken_text)
         except asyncio.CancelledError:
@@ -446,6 +467,8 @@ class CompanionController(QObject):
         except Exception as tts_error:
             logger.warning("Text-to-speech failed: %s", tts_error)
             speech_error = str(tts_error)
+            if QUOTA_EXCEEDED_CODE in speech_error:
+                self._skip_elevenlabs = True
         # Remembered on the GUI thread once heard (see _remember_heard). The scene JSON is left out (it's big, and
         # the [ANIMATE:name] tag already says an animation was shown).
         self._reply_ready.emit(
@@ -508,10 +531,14 @@ class CompanionController(QObject):
         if not self._is_current(reply.generation):
             return
         self.reply_text_changed.emit(reply.spoken_text)
-        self.visuals_ready.emit(VisualPlan(reply.spoken_text, reply.visual_events, reply.speech_audio is not None))
+        speak_text = getattr(self._player, "speak_text", None)
+        # No ElevenLabs audio but a voice error: the Windows voice says it instead (if the player has one).
+        use_windows_voice = reply.speech_audio is None and bool(reply.speech_error) and speak_text is not None
+        has_voice = reply.speech_audio is not None or use_windows_voice
+        self.visuals_ready.emit(VisualPlan(reply.spoken_text, reply.visual_events, has_voice))
         if reply.point_target is not None:
             self.point_requested.emit(reply.point_target)
-        if reply.speech_audio is None:
+        if not has_voice:
             if reply.remember:  # shown as text in full, so it counts as heard
                 self.history.add(reply.transcript, reply.remembered_text)
             self._set_state(CompanionState.IDLE)
@@ -526,7 +553,11 @@ class CompanionController(QObject):
         self._speaking_reply = (reply.transcript, reply.remembered_text) if reply.remember else None
         self._heard_fraction = 0.0
         self._set_state(CompanionState.RESPONDING)
-        self._player.play(reply.speech_audio)
+        if use_windows_voice:
+            self._fallback_text = reply.spoken_text
+            speak_text(reply.spoken_text)
+        else:
+            self._player.play(reply.speech_audio)
 
     # ----- helpers -----
 

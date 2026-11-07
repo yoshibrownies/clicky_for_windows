@@ -252,12 +252,12 @@ def test_path_objects_carry_their_outline_and_transform_values():
 
 def test_icons_use_the_built_in_library_and_unknown_ones_are_skipped():
     scene = scene_with(
-        {"type": "icon", "name": "brain", "x": 5, "y": 1, "size": 4, "label": "brain"},
+        {"type": "icon", "name": "gear", "x": 5, "y": 1, "size": 4, "label": "gear"},
         {"type": "icon", "name": "dragon", "x": 5, "y": 1},
     )
     (item,) = scene.frame(0.5)
-    assert item.kind == "icon" and item.label == "brain" and item.values["size"] == 4
-    assert len(item.segments) > 3
+    assert item.kind == "icon" and item.label == "gear" and item.values["size"] == 4
+    assert len(item.segments) >= 2
     assert item.color == "black"
 
 

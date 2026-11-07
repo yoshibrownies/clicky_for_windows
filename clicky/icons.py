@@ -1,4 +1,5 @@
-"""Built-in figures for illustrations: simple outlines in Clicky's sketch style (pure Python, no Qt).
+"""Built-in general-purpose figures for illustrations (pure Python, no Qt). Kept small and topic-free on purpose:
+anything specific to a subject is drawn by the model with `path`, so illustrations fit whatever is asked.
 
 Each icon is drawn in a unit box: x from -0.5 to 0.5, y from 0 to 1 (y up), anchored at its bottom centre, so a scene
 places it with x, y and a size (its height in world units). Icons are made of several short path pieces.
@@ -43,34 +44,6 @@ _ICON_PIECES: dict[str, tuple[str, ...]] = {
         "M -0.18 0 L -0.18 0.3 C -0.4 0.4 -0.42 0.85 -0.1 0.97 C 0.15 1.04 0.38 0.9 0.38 0.65 "
         "L 0.46 0.5 L 0.38 0.46 L 0.38 0.36 C 0.38 0.28 0.3 0.25 0.18 0.25 L 0.18 0",
     ),
-    "brain": (
-        "M -0.45 0.45 C -0.5 0.75 -0.3 0.95 -0.05 0.92 C 0.1 1.0 0.35 0.95 0.42 0.75 "
-        "C 0.52 0.6 0.48 0.4 0.35 0.32 C 0.3 0.18 0.1 0.15 0 0.22 C -0.15 0.12 -0.42 0.2 -0.45 0.45 Z",
-        "M -0.25 0.86 C -0.12 0.72 -0.3 0.62 -0.15 0.5",
-        "M 0.1 0.9 C 0 0.76 0.2 0.66 0.06 0.52",
-        "M -0.36 0.42 C -0.2 0.47 0 0.36 0.22 0.46",
-        "M 0.28 0.78 C 0.36 0.68 0.3 0.58 0.38 0.5",
-        "M 0.06 0.2 L 0.09 0 L 0.17 0 L 0.19 0.27",
-    ),
-    "neuron": (
-        _circle(-0.25, 0.5, 0.1),
-        "M -0.33 0.56 L -0.45 0.76",
-        "M -0.39 0.66 L -0.5 0.62",
-        "M -0.34 0.44 L -0.46 0.28",
-        "M -0.27 0.6 L -0.31 0.82",
-        "M -0.25 0.4 L -0.21 0.2",
-        "M -0.15 0.5 C 0.05 0.5 0.15 0.44 0.35 0.5",
-        "M 0.35 0.5 L 0.47 0.62",
-        "M 0.35 0.5 L 0.49 0.5",
-        "M 0.35 0.5 L 0.47 0.38",
-    ),
-    "synapse": (
-        "M -0.15 1 L -0.15 0.72 C -0.36 0.62 -0.3 0.46 0 0.46 C 0.3 0.46 0.36 0.62 0.15 0.72 L 0.15 1",
-        _circle(-0.09, 0.6, 0.045),
-        _circle(0.09, 0.62, 0.045),
-        _circle(0, 0.74, 0.045),
-        "M -0.42 0 L -0.42 0.28 C -0.3 0.36 0.3 0.36 0.42 0.28 L 0.42 0",
-    ),
     "lightbulb": (
         "M -0.12 0.25 C -0.12 0.4 -0.32 0.5 -0.32 0.7 C -0.32 0.88 -0.17 1 0 1 "
         "C 0.17 1 0.32 0.88 0.32 0.7 C 0.32 0.5 0.12 0.4 0.12 0.25 Z",
@@ -102,13 +75,6 @@ _ICON_PIECES: dict[str, tuple[str, ...]] = {
         _circle(0.2, 0.3, 0.06),
         _circle(-0.2, 0.7, 0.06),
         _circle(0.2, 0.7, 0.06),
-    ),
-    "domino": (
-        "M -0.22 0 L 0.22 0 L 0.22 1 L -0.22 1 Z",
-        "M -0.16 0.5 L 0.16 0.5",
-        _circle(0, 0.75, 0.05),
-        _circle(-0.1, 0.25, 0.05),
-        _circle(0.1, 0.25, 0.05),
     ),
     "heart": (
         "M 0 0.1 C -0.35 0.4 -0.5 0.6 -0.42 0.8 C -0.34 0.98 -0.08 0.98 0 0.78 "

@@ -83,7 +83,7 @@ def illustrated_scene():
                 "world": {"x": [0, 10], "y": [0, 10]},
                 "objects": [
                     {"type": "icon", "name": "person", "x": 2, "y": 1, "size": 6, "label": "you", "fill": "blue"},
-                    {"type": "icon", "name": "brain", "x": 7, "y": 5, "size": 4, "rotate": 20, "draw": "t/2"},
+                    {"type": "icon", "name": "gear", "x": 7, "y": 5, "size": 4, "rotate": 20, "draw": "t/2"},
                     {"type": "path", "d": "M 0 0 C 1 2 2 2 3 0 Z", "x": 5, "y": 1, "fill": "orange", "label": "hill"},
                     {"type": "rect", "x": 4, "y": 0, "w": 0.5, "h": 3, "rotate": -60, "pivot": "bottom-right"},
                     {"type": "circle", "x": 9, "y": 9, "fill": "none"},
@@ -112,7 +112,7 @@ def test_icons_paths_and_rotated_shapes_paint(qt_app):
     image, scene_painter = paint_to_image(illustrated_scene(), 1.0)
     painted = sum(1 for x in range(0, 420, 4) for y in range(0, 260, 4) if image.pixelColor(x, y).alpha() > 0)
     assert painted > 150
-    assert scene_painter.focus_point is not None  # the brain is still being sketched: the pen is its head
+    assert scene_painter.focus_point is not None  # the gear is still being sketched: the pen is its head
 
 
 def test_highlight_finds_an_icon_by_label(qt_app):

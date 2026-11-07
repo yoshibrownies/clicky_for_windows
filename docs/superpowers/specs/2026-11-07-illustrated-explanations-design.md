@@ -47,6 +47,15 @@ experience feel good. **Learning comes first**: a visual earns its place by maki
   each building on the last (same objects carried forward, the new idea added and highlighted). Keep scenes small
   so replies stay fast. One new tested example (determinism: a chain of causes leading to a person's "choice").
 
+## Revision (2026-11-07, Yoshi: "Do not overfit this code. I want it to be general, able to adapt to any question.")
+- The determinism worked example is removed from the prompt; topics in the brief were illustrations of the need, not
+  content to build in.
+- The icon library keeps only general-purpose figures (person, head, eye, lightbulb, clock, gear, die, heart);
+  brain, neuron, synapse and domino are gone. Anything subject-specific is drawn by the model with `path`.
+- The prompt teaches a method instead of a picture: for each step, invent the picture that makes it click (the thing
+  itself, how it moves, how parts connect or cause each other, or how much); no stock picture for any topic.
+- Tests guard this: the prompt's icon list matches the library, and the library stays small and topic-free.
+
 ## Non-goals
 Real photos or textbook images; image generation; changes to the Worker; a separate drawing window.
 

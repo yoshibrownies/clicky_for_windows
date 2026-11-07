@@ -94,25 +94,25 @@ def test_prompt_explains_the_cut_off_marker():
     assert CUT_OFF_MARKER in COMPANION_SYSTEM_PROMPT
 
 
-def test_prompt_teaches_drawn_illustrations_that_follow_the_explanation():
+def test_prompt_teaches_drawn_illustrations_generally():
     import re
 
     from clicky.icons import ICON_NAMES
-    from clicky.scene import parse_scene
-    from clicky.visuals import MAX_ANIMATIONS, parse_visual_reply
+    from clicky.visuals import MAX_ANIMATIONS
 
     lowered = COMPANION_SYSTEM_PROMPT.lower()
-    for name in ICON_NAMES:
-        assert name in lowered
+    listed = re.search(r"icons: ([a-z, ]+)\.", lowered).group(1).split(", ")
+    assert set(listed) == set(ICON_NAMES)  # the prompt offers exactly the figures that exist
     for key in ("path {d:", "icon {name", "rotate", "opacity", "draw", "fill", "train of thought"):
         assert key in lowered, key
     assert f"{MAX_ANIMATIONS} animations" in lowered
-    examples = re.findall(r'^- user asks[^"]*"(.*)"\s*$', COMPANION_SYSTEM_PROMPT, flags=re.MULTILINE)
-    stepped = [example for example in examples if example.count("[ANIMATE:") >= 2]
-    assert stepped, "one example should show a picture per step"
-    kinds = set()
-    for example in stepped:
-        for event in parse_visual_reply(example).events:
-            if event.kind == "animate":
-                kinds |= {item.kind for item in parse_scene(event.text).frame(3.0)}
-    assert {"icon", "rect"} <= kinds
+    assert "you draw yourself with path" in lowered  # anything else gets sketched for the question at hand
+    assert "design a fresh one every time" in lowered
+
+
+def test_the_figure_library_stays_general_purpose():
+    from clicky.icons import ICON_NAMES
+
+    # Subject-specific figures belong in the model's own path drawings, not the library (no overfitting to a topic).
+    assert len(ICON_NAMES) <= 10
+    assert not {"brain", "neuron", "synapse", "domino"} & set(ICON_NAMES)

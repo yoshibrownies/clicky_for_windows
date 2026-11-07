@@ -28,7 +28,8 @@ Python 3.13 + PySide6 port of farzaa/clicky. Read `docs/design.md` before changi
   Every scene example in `prompts.py` must parse (tested). Design: `docs/superpowers/specs/2026-11-06-animations-and-clear-design.md`.
 - Illustrations: scenes also draw `path` (SVG path data via `paths.parse_path_data`, whitelisted, never raises) and `icon`
   (`icons.py` library); up to `MAX_ANIMATIONS` (4) scenes per reply, one per step of the explanation. Prompt icon names must
-  match `icons.ICON_NAMES` (tested). Design: `docs/superpowers/specs/2026-11-07-illustrated-explanations-design.md`.
+  match `icons.ICON_NAMES` (tested). Stay general: no topic-specific icons or worked examples (Yoshi: "do not overfit");
+  subject-specific drawings come from the model's own `path` sketches. Design: `docs/superpowers/specs/2026-11-07-illustrated-explanations-design.md`.
 - History holds only what you heard: a reply is added when speech ends, or cut at playback progress
   (`visuals.heard_part`) plus `prompts.CUT_OFF_MARKER` when interrupted.
   Design: `docs/superpowers/specs/2026-11-07-interrupt-awareness-design.md`.

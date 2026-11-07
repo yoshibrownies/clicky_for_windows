@@ -5,15 +5,11 @@ from clicky.icons import ICON_NAMES, icon_subpaths
 EXPECTED = {
     "person",
     "head",
-    "brain",
-    "neuron",
-    "synapse",
     "lightbulb",
     "clock",
     "gear",
     "eye",
     "die",
-    "domino",
     "heart",
 }
 

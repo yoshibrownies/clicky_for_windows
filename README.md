@@ -66,6 +66,9 @@ Clicky explains properly (several sentences, an intuition, an example) and shows
 - **Animations** play inside the card: a ball speeding up with its velocity arrow growing, a graph plotting itself,
   a list being sorted step by step. Clicky writes a fresh scene for each question in its own safe animation
   language (shapes, arrows, plots, formulas of time, keyframes); nothing it writes is ever run as code.
+- **Drawn illustrations that follow the explanation**: up to four little scenes per answer, one per step, each
+  building on the last. Figures (a person, a brain, a neuron, a synapse, dominoes, …) sketch themselves in, tip over,
+  fade and light up as Clicky talks.
 - **Animated underlines and circles** mark the exact words or buttons on your real screen, and the buddy can fly
   over to point.
 - **Follow-up chips** ("Explain terminal speed", "Try a calculation") appear under the card when it finishes. Click

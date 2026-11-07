@@ -25,6 +25,7 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QPixmap,
     QPolygonF,
 )
 from PySide6.QtWidgets import QWidget
@@ -98,6 +99,7 @@ class _Block:
     lines: list[str]
     diagram: Diagram | None = None
     diagram_layout: DiagramLayout | None = None  # worked out once, with labels wrapped to fit
+    still: QPixmap | None = None  # a finished animation, drawn once and reused instead of repainting
     scene: Scene | None = None
 
     def progress(self, now: float) -> float:
@@ -865,14 +867,41 @@ class LessonCard(QWidget):
         assert scene is not None
         area = self._animation_area(top)
         appear = min(1.0, (now - block.starts_at) / BLOCK_FADE_SECONDS)
-        painter.save()
-        painter.setOpacity(painter.opacity() * appear)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(ANIMATION_PANEL)
-        painter.drawRoundedRect(area, 12, 12)
         scene_time = max(0.0, min(scene.duration, now - block.starts_at))
         highlight = None
         if self._highlight is not None and self._highlight[2] is block:
             highlight = (self._highlight[0], now - self._highlight[1])
-        self._scene_painter.paint(painter, area, scene, scene_time, highlight=highlight)
-        painter.restore()
+        finished = highlight is None and appear >= 1.0 and now - block.starts_at >= scene.duration
+        if not finished:
+            block.still = None  # playing, fading in or ringed: paint live (re-cached once it settles)
+            painter.save()
+            painter.setOpacity(painter.opacity() * appear)
+            self._paint_animation_contents(painter, area, scene, scene_time, highlight)
+            painter.restore()
+            return
+        if block.still is None or block.still.deviceIndependentSize() != area.size():
+            block.still = self._render_still(scene, area)
+        painter.drawPixmap(area.topLeft(), block.still)
+
+    def _paint_animation_contents(
+        self, painter: QPainter, area: QRectF, scene: Scene, t: float, highlight: tuple[str, float] | None
+    ) -> None:
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(ANIMATION_PANEL)
+        painter.drawRoundedRect(area, 12, 12)
+        self._scene_painter.paint(painter, area, scene, t, highlight=highlight)
+
+    def _render_still(self, scene: Scene, area: QRectF) -> QPixmap:
+        """The animation's last frame as a picture at the screen's pixel ratio (sharp on scaled displays)."""
+        ratio = self.devicePixelRatioF() or 1.0
+        still = QPixmap(max(1, math.ceil(area.width() * ratio)), max(1, math.ceil(area.height() * ratio)))
+        still.setDevicePixelRatio(ratio)
+        still.fill(Qt.GlobalColor.transparent)
+        still_painter = QPainter(still)
+        still_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        still_painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        # Painted at the block's real position, so the painter's focus point stays in card coordinates.
+        still_painter.translate(-area.left(), -area.top())
+        self._paint_animation_contents(still_painter, area, scene, scene.duration, None)
+        still_painter.end()
+        return still

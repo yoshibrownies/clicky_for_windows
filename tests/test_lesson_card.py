@@ -250,3 +250,112 @@ def test_a_diagram_with_long_labels_gets_a_taller_block_and_keeps_every_word(qt_
             assert " ".join(layout.lines[node]) == label  # wrapped, never cut
     finally:
         card.close()
+
+
+# ---------- finished animations become still pictures ----------
+
+
+def _dot_scene():
+    import json
+
+    from clicky.scene import parse_scene
+
+    return parse_scene(
+        json.dumps(
+            {
+                "duration": 1,
+                "world": {"x": [0, 10], "y": [0, 10]},
+                "objects": [{"type": "circle", "x": 5, "y": 5, "r": 30, "color": "red", "label": "dot"}],
+            }
+        )
+    )
+
+
+def _paint_block(card, block, now):
+    from PySide6.QtGui import QImage, QPainter
+
+    image = QImage(card.width(), card.height(), QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    card._paint_animation(painter, block, 60.0, now)
+    painter.end()
+    return image
+
+
+def _counting_frames(scene):
+    calls = []
+    original = scene.frame
+
+    def counted(t):
+        calls.append(t)
+        return original(t)
+
+    scene.frame = counted
+    return calls
+
+
+def test_a_finished_animation_is_drawn_from_a_still_picture(qt_app):
+    card = make_card()
+    try:
+        card.start_reply()
+        card.play_animation(_dot_scene())
+        block = card._blocks[-1]
+        calls = _counting_frames(block.scene)
+        done = block.starts_at + 2.0
+        _paint_block(card, block, done)
+        assert block.still is not None
+        calls.clear()
+        _paint_block(card, block, done + 0.5)
+        assert calls == []  # not re-evaluated: the still picture was drawn
+    finally:
+        card.close()
+
+
+def test_a_highlight_on_a_finished_animation_paints_live(qt_app):
+    import time
+
+    card = make_card()
+    try:
+        card.start_reply()
+        card.play_animation(_dot_scene())
+        block = card._blocks[-1]
+        block.starts_at = time.monotonic() - 5.0  # long finished
+        _paint_block(card, block, time.monotonic())
+        assert block.still is not None
+        calls = _counting_frames(block.scene)
+        card.highlight("dot")
+        _paint_block(card, block, time.monotonic() + 0.5)
+        assert calls, "a ringed animation paints live so the ring can follow its object"
+        assert card._scene_painter.highlight_rect is not None
+    finally:
+        card.close()
+
+
+def test_the_still_picture_looks_like_the_live_drawing(qt_app):
+    card = make_card()
+    try:
+        card.start_reply()
+        card.play_animation(_dot_scene())
+        block = card._blocks[-1]
+        live = _paint_block(card, block, block.starts_at + block.scene.duration - 1e-3 + 0.0)  # last live frame
+        block.still = None
+        still = _paint_block(card, block, block.starts_at + 3.0)
+        different = 0
+        samples = 0
+        for x in range(0, card.width(), 4):
+            for y in range(0, card.height(), 4):
+                a, b = live.pixelColor(x, y), still.pixelColor(x, y)
+                samples += 1
+                if (
+                    max(
+                        abs(a.red() - b.red()),
+                        abs(a.green() - b.green()),
+                        abs(a.blue() - b.blue()),
+                        abs(a.alpha() - b.alpha()),
+                    )
+                    > 8
+                ):
+                    different += 1
+        assert different / samples < 0.02
+    finally:
+        card.close()

@@ -852,3 +852,26 @@ def test_if_the_windows_voice_fails_too_the_answer_is_shown(qt_app, runner):
     controller.handle_voice_failed("no windows voice is available")
     assert controller.state is CompanionState.IDLE
     assert notices and "click save." in notices[-1]
+
+
+def test_cutting_off_the_windows_voice_remembers_only_what_was_heard(qt_app, runner):
+    services = CountingVoiceServices(QUOTA_ERROR, reply_chunks=LONG_REPLY)
+    controller, player, _ = controller_with_speaking_player(runner, services)
+    ask(controller)
+    wait_until(lambda: player.spoken_texts)
+    controller.handle_playback_progress(0.4)
+    controller.stop_speaking()  # Esc
+    remembered = controller.history.as_messages()[-1]["content"]
+    assert remembered.endswith(CUT_OFF_MARKER) and "cortex" not in remembered
+
+
+def test_a_quota_error_from_the_early_voice_request_also_stops_elevenlabs(qt_app, runner):
+    scene = '<scene name="a">{"duration": 3, "objects": [{"type": "circle", "x": 1, "y": 1}]}</scene>'
+    services = CountingVoiceServices(QUOTA_ERROR, reply_chunks=("first part. [ANIMATE:a] ", scene))
+    controller, player, _ = controller_with_speaking_player(runner, services)
+    ask(controller)
+    wait_until(lambda: len(player.spoken_texts) == 1)
+    controller.handle_playback_finished()
+    ask(controller)
+    wait_until(lambda: len(player.spoken_texts) == 2)
+    assert len(services.spoken) == 1

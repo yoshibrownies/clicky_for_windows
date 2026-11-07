@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtTextToSpeech import QTextToSpeech
 
 from clicky.playback import SpeechPlayer
 
 logger = logging.getLogger(__name__)
+
+# winrt starts speaking in about 0.3 s; if nothing has started by then, the engine is stuck and the answer goes to text.
+START_TIMEOUT_MS = 4000
 
 
 class SystemVoice(QObject):
@@ -25,8 +28,14 @@ class SystemVoice(QObject):
     finished = Signal()
     failed = Signal(str)
 
-    def __init__(self, engine: str = "winrt", parent: QObject | None = None) -> None:
+    def __init__(
+        self, engine: str = "winrt", parent: QObject | None = None, start_timeout_ms: int = START_TIMEOUT_MS
+    ) -> None:
         super().__init__(parent)
+        self._start_timer = QTimer(self)
+        self._start_timer.setSingleShot(True)
+        self._start_timer.setInterval(start_timeout_ms)
+        self._start_timer.timeout.connect(self._on_start_timeout)
         available = QTextToSpeech.availableEngines()
         chosen = engine if engine in available else (available[0] if available else "")
         self._speech = QTextToSpeech(chosen, self) if chosen else None
@@ -49,14 +58,21 @@ class SystemVoice(QObject):
         if self._speech is None or not text.strip():
             self.failed.emit("no windows voice is available")
             return
+        if self._speech.state() == QTextToSpeech.State.Error:
+            # Already in Error: a failing say() changes nothing, so no state signal would ever report it.
+            self._is_playing = True
+            self._fail(self._speech.errorString() or "windows voice is in an error state")
+            return
         self._text = text
         self._is_playing = True
+        self._start_timer.start()
         self._speech.say(text)
 
     def stop(self) -> None:
         if not self._is_playing:
             return
         self._is_playing = False  # before stop(): the Ready state it reports must not finish a second time
+        self._start_timer.stop()
         if self._speech is not None:
             self._speech.stop()
         self.finished.emit()
@@ -69,17 +85,32 @@ class SystemVoice(QObject):
         if not self._is_playing:
             return
         if state == QTextToSpeech.State.Speaking:
+            self._start_timer.stop()
             self.started.emit()
         elif state == QTextToSpeech.State.Ready:
+            self._start_timer.stop()
             self._is_playing = False
             self.progress.emit(1.0)
             self.finished.emit()
         elif state == QTextToSpeech.State.Error:
-            message = self._speech.errorString() if self._speech is not None else "windows voice failed"
-            logger.warning("Windows voice failed: %s", message)
-            self._is_playing = False
-            self.failed.emit(message)
-            self.finished.emit()
+            self._fail(self._speech.errorString() if self._speech is not None else "windows voice failed")
+
+    def _on_start_timeout(self) -> None:
+        if self._is_playing:
+            # Fail first: winrt reports Ready synchronously on stop(), which must not count as a finished answer.
+            self._fail("windows voice didn't start")
+            if self._speech is not None:
+                self._speech.stop()
+
+    def _fail(self, message: str) -> None:
+        """Report a failure (the answer is then shown as text), then finish once."""
+        if not self._is_playing:
+            return
+        logger.warning("Windows voice failed: %s", message)
+        self._is_playing = False
+        self._start_timer.stop()
+        self.failed.emit(message)
+        self.finished.emit()
 
 
 class VoiceOutput(QObject):

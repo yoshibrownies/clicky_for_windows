@@ -67,3 +67,73 @@ def test_voice_output_routes_text_to_the_system_voice_and_stops_it(qt_app):
     output.stop()
     QCoreApplication.processEvents()
     assert events["finished"] == 1 and not output.is_playing
+
+
+def record_failures(source):
+    failures = []
+    source.failed.connect(failures.append)
+    return failures
+
+
+def test_a_voice_already_in_an_error_state_fails_at_once(qt_app):
+    from PySide6.QtTextToSpeech import QTextToSpeech
+
+    from clicky.system_voice import SystemVoice
+
+    voice = SystemVoice(engine="mock")
+    events, failures = record(voice), record_failures(voice)
+    voice._speech.state = lambda: QTextToSpeech.State.Error  # say() would change nothing, so nothing would report
+    voice.speak("hello")
+    assert failures and not voice.is_playing and events["finished"] == 1
+
+
+def test_a_voice_that_never_starts_gives_up_after_the_timeout(qt_app):
+    from clicky.system_voice import SystemVoice
+
+    voice = SystemVoice(engine="mock", start_timeout_ms=100)
+    events, failures = record(voice), record_failures(voice)
+    voice._speech.say = lambda text: None  # the engine silently does nothing
+    voice.speak("hello")
+    wait_until(lambda: failures, timeout=2.0)
+    assert events["finished"] == 1 and not voice.is_playing
+
+
+def test_an_error_while_speaking_fails_then_finishes_once(qt_app):
+    from PySide6.QtTextToSpeech import QTextToSpeech
+
+    from clicky.system_voice import SystemVoice
+
+    voice = SystemVoice(engine="mock")
+    order = []
+    voice.failed.connect(lambda message: order.append("failed"))
+    voice.finished.connect(lambda: order.append("finished"))
+    voice.speak("a sentence long enough to still be speaking")
+    voice._on_state_changed(QTextToSpeech.State.Error)
+    voice.stop()
+    assert order == ["failed", "finished"]
+
+
+def test_voice_output_forwards_failures(qt_app):
+    from clicky.playback import SpeechPlayer
+    from clicky.system_voice import SystemVoice, VoiceOutput
+
+    voice = SystemVoice(engine="mock")
+    output = VoiceOutput(SpeechPlayer(), voice)
+    failures = record_failures(output)
+    output.speak_text("   ")  # nothing to say
+    assert failures
+
+
+def test_a_timeout_is_reported_as_a_failure_even_if_stopping_reports_ready(qt_app):
+    from PySide6.QtTextToSpeech import QTextToSpeech
+
+    from clicky.system_voice import SystemVoice
+
+    voice = SystemVoice(engine="mock", start_timeout_ms=100)
+    failures = record_failures(voice)
+    events = record(voice)
+    voice._speech.say = lambda text: None
+    voice._speech.stop = lambda *args: voice._on_state_changed(QTextToSpeech.State.Ready)  # like winrt
+    voice.speak("hello")
+    wait_until(lambda: events["finished"], timeout=2.0)
+    assert failures and events["finished"] == 1

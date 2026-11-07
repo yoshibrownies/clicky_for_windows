@@ -33,7 +33,7 @@ Python 3.13 + PySide6 port of farzaa/clicky. Read `docs/design.md` before changi
 - Voice: `VoiceOutput` (`system_voice.py`) plays ElevenLabs MP3s and falls back to Windows' own voice (Qt
   `QTextToSpeech`, word progress) when the voice can't be fetched; after `quota_exceeded` ElevenLabs isn't asked again
   until restart. Tests use the silent `mock` engine. Design: `docs/superpowers/specs/2026-11-07-system-voice-fallback-design.md`.
-- Network: `dns_fallback.install_dns_fallback` (called in `app.run`) backs up the system lookup of the Worker host
+- Network: `dns_fallback.install_dns_fallback` (called in `app.main` at startup) backs up the system lookup of the Worker host
   with DNS-over-HTTPS (1.1.1.1, then 8.8.8.8) for networks that refuse `*.workers.dev`; other hosts untouched.
   Design: `docs/superpowers/specs/2026-11-07-worker-dns-fallback-design.md`.
 - History holds only what you heard: a reply is added when speech ends, or cut at playback progress

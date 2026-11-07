@@ -90,3 +90,33 @@ def test_resolve_over_https_reads_a_records_and_tries_the_next_resolver():
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         assert dns_fallback.resolve_over_https(WORKER, client=client) == ["104.21.0.1"]
     assert seen == ["1.1.1.1", "8.8.8.8"]
+
+
+def test_a_slow_failing_system_lookup_does_not_hold_up_the_backup(monkeypatch):
+    import time
+
+    def slow_system(host, port, family=0, type=0, proto=0, flags=0):
+        time.sleep(1.5)  # the hotspot takes ~12 s to refuse; Clicky's connections give up after 10 s
+        raise socket.gaierror(11001, "getaddrinfo failed")
+
+    monkeypatch.setattr(socket, "getaddrinfo", slow_system)
+    monkeypatch.setattr(dns_fallback, "_installed", None)
+    monkeypatch.setattr(dns_fallback, "SYSTEM_LOOKUP_BUDGET_SECONDS", 0.1)
+    dns_fallback.clear_cache()
+    dns_fallback.install_dns_fallback([WORKER], resolve=lambda host: ["104.21.0.1"])
+    started = time.monotonic()
+    assert socket.getaddrinfo(WORKER, 443)[0][4] == ("104.21.0.1", 443)
+    assert time.monotonic() - started < 0.8
+
+
+def test_after_a_failure_the_system_lookup_is_skipped_for_a_while(fake_system):
+    dns_fallback.install_dns_fallback([WORKER], resolve=lambda host: ["104.21.0.1"])
+    socket.getaddrinfo(WORKER, 443)
+    asked_system = fake_system.count(WORKER)
+    socket.getaddrinfo(WORKER, 443)
+    assert fake_system.count(WORKER) == asked_system  # the remembered answer was used straight away
+
+
+def test_a_bytes_hostname_as_the_async_stack_passes_it(fake_system):
+    dns_fallback.install_dns_fallback([WORKER], resolve=lambda host: ["104.21.0.1"])
+    assert socket.getaddrinfo(WORKER.encode(), 443, 0, socket.SOCK_STREAM)[0][4] == ("104.21.0.1", 443)

@@ -332,6 +332,11 @@ class CompanionController(QObject):
         self._set_state(CompanionState.IDLE)
         return True
 
+    def forget(self) -> None:
+        """Tray "Forget": clear the history, including the answer being spoken right now (saved only once heard)."""
+        self._speaking_reply = None
+        self.history.clear()
+
     @Slot(float)
     def handle_playback_progress(self, fraction: float) -> None:
         self._heard_fraction = max(self._heard_fraction, fraction)

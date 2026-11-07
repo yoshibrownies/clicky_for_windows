@@ -331,7 +331,7 @@ def main() -> int:
 
     escape_bridge.tapped.connect(build_escape_handler(controller, clear_all, something_visible))
     escape_watcher = KeyTapWatcher(VK_ESCAPE, escape_bridge.tapped.emit)
-    tray.forget_requested.connect(controller.history.clear)
+    tray.forget_requested.connect(controller.forget)
     tray.forget_requested.connect(lambda: overlay.show_notice("okay, fresh start."))
 
     hotkey_bridge = HotkeyBridge()

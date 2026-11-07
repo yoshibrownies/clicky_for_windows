@@ -697,3 +697,12 @@ def test_a_cut_off_answer_is_not_saved_again_when_the_player_reports_finished(qt
     controller.stop_speaking()
     controller.handle_playback_finished()  # the real player emits finished on stop()
     assert len(controller.history) == 1
+
+
+def test_forget_during_speech_also_forgets_the_answer_being_spoken(qt_app, runner):
+    _, controller, _ = start_long_reply(runner)
+    controller.history.add("older question", "older answer")
+    controller.handle_playback_progress(0.6)
+    controller.forget()  # tray "Forget" while Clicky is mid-answer
+    controller.handle_playback_finished()
+    assert len(controller.history) == 0

@@ -402,11 +402,24 @@ class CompanionController(QObject):
         )
         reply_text = ""
         stop_reason: str | None = None
-        async for stream_event in self._services.stream_reply(request_body):
-            if isinstance(stream_event, TextDelta):
-                reply_text += stream_event.text
-            elif isinstance(stream_event, StreamFinished):
-                stop_reason = stream_event.stop_reason
+        # Speech comes before the <scene> blocks, so the voice is fetched as soon as the first block starts instead
+        # of after every animation's JSON has streamed in (several scenes would otherwise mean seconds of silence).
+        early_speech: asyncio.Task | None = None
+        early_text = ""
+        try:
+            async for stream_event in self._services.stream_reply(request_body):
+                if isinstance(stream_event, TextDelta):
+                    reply_text += stream_event.text
+                    if early_speech is None and "<scene" in reply_text.lower():
+                        early_text = build_visual_plan(reply_text, screen_captures)[0]
+                        if early_text:
+                            early_speech = asyncio.ensure_future(self._services.fetch_speech(early_text))
+                elif isinstance(stream_event, StreamFinished):
+                    stop_reason = stream_event.stop_reason
+        except BaseException:
+            if early_speech is not None:
+                early_speech.cancel()
+            raise
 
         visual_events: tuple[ScreenVisualEvent, ...] = ()
         if stop_reason == "refusal":
@@ -418,8 +431,18 @@ class CompanionController(QObject):
 
         speech_audio: bytes | None = None
         speech_error: str | None = None
+        if early_speech is not None and early_text != spoken_text:
+            early_speech.cancel()  # the words changed after the first scene (or a refusal): fetch the real ones
+            early_speech = None
         try:
-            speech_audio = await self._services.fetch_speech(spoken_text)
+            if early_speech is not None:
+                speech_audio = await early_speech
+            else:
+                speech_audio = await self._services.fetch_speech(spoken_text)
+        except asyncio.CancelledError:
+            if early_speech is not None:
+                early_speech.cancel()
+            raise
         except Exception as tts_error:
             logger.warning("Text-to-speech failed: %s", tts_error)
             speech_error = str(tts_error)

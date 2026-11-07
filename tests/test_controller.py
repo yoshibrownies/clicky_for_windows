@@ -706,3 +706,57 @@ def test_forget_during_speech_also_forgets_the_answer_being_spoken(qt_app, runne
     controller.forget()  # tray "Forget" while Clicky is mid-answer
     controller.handle_playback_finished()
     assert len(controller.history) == 0
+
+
+# ---------- the voice starts while the drawings are still being written ----------
+
+
+class SceneStreamingServices(FakeServices):
+    """Speech comes first, then scene blocks; the stream waits (up to 2 s) for the voice to be requested."""
+
+    def __init__(self, **kwargs) -> None:
+        scene = (
+            '{"duration": 3, "world": {"x": [0, 1], "y": [0, 1]}, "objects": [{"type": "circle", "x": 0.5, "y": 0.5}]}'
+        )
+        super().__init__(
+            reply_chunks=("watch this. [ANIMATE:a] it grows. ", '<scene name="a">', scene, "</scene>"), **kwargs
+        )
+        self.order: list[str] = []
+
+    async def stream_reply(self, request_body):
+        self.request_bodies.append(request_body)
+        for chunk in self.reply_chunks:
+            yield TextDelta(chunk)
+            if chunk.startswith("<scene"):
+                for _ in range(200):
+                    if self.spoken:
+                        break
+                    await asyncio.sleep(0.01)
+        self.order.append("stream finished")
+        yield StreamFinished(self.stop_reason)
+
+    async def fetch_speech(self, text):
+        self.order.append("speech requested")
+        return await super().fetch_speech(text)
+
+
+def test_the_voice_is_fetched_while_scene_blocks_are_still_streaming(qt_app, runner):
+    services = SceneStreamingServices()
+    controller, player, _, _ = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    assert services.order == ["speech requested", "stream finished"]
+    assert services.spoken == ["watch this. it grows."]  # fetched once, with the final words
+    assert player.played == [b"mp3"]
+
+
+def test_words_after_a_scene_block_get_the_voice_refetched(qt_app, runner):
+    scene = '<scene name="a">{"duration": 3, "objects": [{"type": "circle", "x": 1, "y": 1}]}</scene>'
+    services = FakeServices(reply_chunks=("first part. [ANIMATE:a] ", scene, " and a late sentence."))
+    controller, player, _, _ = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    assert services.spoken[-1] == "first part. and a late sentence."
+    assert player.played == [b"mp3"]

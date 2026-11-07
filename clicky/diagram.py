@@ -27,6 +27,7 @@ BOX_VERTICAL_PADDING = 12.0
 MIN_FONT_SCALE = 11 / 13
 FONT_SCALES = (1.0, 0.92, MIN_FONT_SCALE)
 ELLIPSIS = "…"
+MIN_STACK_GAP = 8.0  # gaps between stacked boxes may close up to this before boxes shrink
 
 
 @dataclass(frozen=True)
@@ -188,6 +189,7 @@ def layout_diagram(
         lines = {node: (label,) for node, label in enumerate(diagram.nodes)}
         font_scale = 1.0
     else:
+        words_of = {node: set(label.split()) for node, label in enumerate(diagram.nodes)}
 
         def wrapped(box_width: float, scale: float) -> dict[int, tuple[str, ...]]:
             available = box_width - LABEL_PADDING
@@ -196,67 +198,99 @@ def layout_diagram(
                 for node, label in enumerate(diagram.nodes)
             }
 
+        def splits_words(candidate_lines: dict[int, tuple[str, ...]]) -> bool:
+            return any(
+                not set(line.split()) <= words_of[node] for node, lines in candidate_lines.items() for line in lines
+            )
+
         def box_height_for(line_count: int, scale: float) -> float:
             return max(BOX_HEIGHT, line_count * LABEL_LINE_HEIGHT * scale + BOX_VERTICAL_PADDING)
 
-        def total_height(horizontal: bool, box_height: float) -> float:
-            if horizontal:
-                return stacked(widest_layer, box_height, SIBLING_GAP)
-            return stacked(layer_count, box_height, LAYER_GAP)
+        def stack(horizontal: bool) -> tuple[int, float]:
+            """How many boxes stack up the diagram's height, and their preferred gap."""
+            return (widest_layer, SIBLING_GAP) if horizontal else (layer_count, LAYER_GAP)
 
-        chosen = None
-        for scale in FONT_SCALES:
-            candidates = []
+        def fits_cap(horizontal: bool, box_height: float) -> bool:
+            if max_height is None:
+                return True
+            count, _ = stack(horizontal)
+            return count * box_height + MIN_STACK_GAP * (count - 1) <= max_height
+
+        # Every direction and font size that keeps each label within three lines and the diagram within the cap.
+        # Best: no word split mid-word, then the largest font, then fewer lines, then the roomier direction.
+        candidates = []
+        for scale_index, scale in enumerate(FONT_SCALES):
             for candidate_horizontal, candidate_width in ((True, h_box_width), (False, v_box_width)):
                 candidate_lines = wrapped(candidate_width, scale)
                 line_count = max(len(node_lines) for node_lines in candidate_lines.values())
                 candidate_height = box_height_for(line_count, scale)
-                fits_cap = max_height is None or total_height(candidate_horizontal, candidate_height) <= max_height
-                if line_count <= MAX_LABEL_LINES and fits_cap:
-                    preference = 0 if candidate_horizontal == prefer_horizontal else 1
+                if line_count <= MAX_LABEL_LINES and fits_cap(candidate_horizontal, candidate_height):
+                    key = (
+                        splits_words(candidate_lines),
+                        scale_index,
+                        line_count,
+                        0 if candidate_horizontal == prefer_horizontal else 1,
+                    )
                     candidates.append(
-                        (
-                            line_count,
-                            preference,
-                            candidate_horizontal,
-                            candidate_width,
-                            candidate_height,
-                            candidate_lines,
-                        )
+                        (key, candidate_horizontal, candidate_width, candidate_height, candidate_lines, scale)
                     )
-            if candidates:
-                _, _, horizontal, box_width, box_height, lines = min(candidates, key=lambda item: item[:2])
-                chosen = scale
-                break
-        if chosen is None:
-            # Last resort: the smallest font, the roomier direction, at most three lines, an ellipsis on the rest.
-            chosen = MIN_FONT_SCALE
-            horizontal = h_box_width >= v_box_width
+        if candidates:
+            _, horizontal, box_width, box_height, lines, font_scale = min(candidates, key=lambda item: item[0])
+        else:
+            # Last resort: the smallest font, in the direction that leaves room for the most lines under the cap, with
+            # an ellipsis on whatever doesn't fit.
+            font_scale = MIN_FONT_SCALE
+            line_height = LABEL_LINE_HEIGHT * font_scale
+
+            def lines_allowed(horizontal: bool) -> int:
+                if max_height is None:
+                    return MAX_LABEL_LINES
+                count, _ = stack(horizontal)
+                tallest_box = (max_height - MIN_STACK_GAP * (count - 1)) / count
+                return max(1, min(MAX_LABEL_LINES, int((tallest_box - 4) // line_height)))
+
+            # Room for text = lines that fit × line width; take the direction that shows the most of each label.
+            horizontal = max(
+                (True, False),
+                key=lambda h: lines_allowed(h) * ((h_box_width if h else v_box_width) - LABEL_PADDING),
+            )
             box_width = h_box_width if horizontal else v_box_width
-
-            def small_measure(text: str) -> float:
-                return measure(text) * MIN_FONT_SCALE
-
+            allowed = lines_allowed(horizontal)
             lines = {}
-            for node, node_lines in wrapped(box_width, chosen).items():
-                if len(node_lines) > MAX_LABEL_LINES:
-                    rest = " ".join(node_lines[MAX_LABEL_LINES - 1 :])
-                    node_lines = (
-                        *node_lines[: MAX_LABEL_LINES - 1],
-                        _elide(rest, small_measure, box_width - LABEL_PADDING),
-                    )
+            for node, node_lines in wrapped(box_width, font_scale).items():
+                if len(node_lines) > allowed:
+                    rest = " ".join(node_lines[allowed - 1 :])
+                    last = _elide(rest, lambda text: measure(text) * font_scale, box_width - LABEL_PADDING)
+                    node_lines = (*node_lines[: allowed - 1], last)
                 lines[node] = node_lines
-            box_height = box_height_for(MAX_LABEL_LINES, chosen)
-        font_scale = chosen
-        layer_gap = h_layer_gap if horizontal else LAYER_GAP
-        sibling_gap = SIBLING_GAP if horizontal else v_sibling_gap
+            box_height = box_height_for(allowed, font_scale)
+        if horizontal:
+            layer_gap, sibling_gap = h_layer_gap, SIBLING_GAP
+        else:
+            layer_gap, sibling_gap = LAYER_GAP, v_sibling_gap
 
     count, gap = (widest_layer, sibling_gap) if horizontal else (layer_count, layer_gap)
     needed_height = stacked(count, box_height, gap)
+    if max_height is not None and needed_height > max_height and count > 1:
+        # Too tall: close the gaps up first (never below MIN_STACK_GAP, so arrows still show).
+        gap = max(MIN_STACK_GAP, (max_height - count * box_height) / (count - 1))
+        if horizontal:
+            sibling_gap = gap
+        else:
+            layer_gap = gap
+        needed_height = stacked(count, box_height, gap)
     if max_height is not None and needed_height > max_height:
-        # Past every other step: squeeze the boxes into the cap rather than spill out of the card.
+        # Still too tall: shorter boxes, holding only the lines that fit (the last one elided).
         box_height = max(1.0, (max_height - gap * (count - 1)) / count)
         needed_height = stacked(count, box_height, gap)
+        if measure is not None:
+            line_height = LABEL_LINE_HEIGHT * font_scale
+            allowed = max(1, int((box_height - 2) // line_height))
+            for node, node_lines in list(lines.items()):
+                if len(node_lines) > allowed:
+                    rest = " ".join(node_lines[allowed - 1 :])
+                    last = _elide(rest, lambda text: measure(text) * font_scale, box_width - LABEL_PADDING)
+                    lines[node] = (*node_lines[: allowed - 1], last)
     area_height = max(height, needed_height)
 
     boxes: dict[int, tuple[float, float, float, float]] = {}

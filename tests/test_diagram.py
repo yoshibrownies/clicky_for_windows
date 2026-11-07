@@ -148,3 +148,44 @@ def test_eight_boxes_in_a_layer_fit():
 def test_without_a_measure_layout_is_one_line_per_box():
     layout = layout_diagram(parse_diagram("a -> b"), 388, 174)
     assert layout.lines == {0: ("a",), 1: ("b",)} and layout.font_scale == 1.0
+
+
+def _text_fits_and_boxes_stay_apart(layout, area_height):
+    from clicky.diagram import LABEL_LINE_HEIGHT
+
+    boxes = list(layout.boxes.values())
+    for node, (_x, y, _width, height) in layout.boxes.items():
+        assert len(layout.lines[node]) * LABEL_LINE_HEIGHT * layout.font_scale <= height + 1e-6, node
+        assert y >= -1e-6 and y + height <= area_height + 1e-6
+    for first, second in itertools.combinations(boxes, 2):
+        assert not boxes_overlap(first, second)
+
+
+def test_a_squeezed_long_chain_never_spills_text_out_of_its_boxes():
+    diagram = parse_diagram(" -> ".join(f"long stage name number {index}" for index in range(8)))
+    layout = layout_diagram(diagram, 384, 174, measure=fake_measure, max_height=324)
+    assert layout.needed_height <= 324
+    _text_fits_and_boxes_stay_apart(layout, max(174, layout.needed_height))
+
+
+def test_eight_children_with_long_labels_never_overlap():
+    diagram = parse_diagram("; ".join(f"root -> a fairly long child label {index}" for index in range(7)))
+    layout = layout_diagram(diagram, 384, 174, measure=fake_measure, max_height=324)
+    _text_fits_and_boxes_stay_apart(layout, max(174, layout.needed_height))
+
+
+def test_whole_words_stay_whole_when_some_layout_allows_it():
+    diagram = parse_diagram(" -> ".join(f"consolidation stage {index}" for index in range(6)))
+    layout = layout_diagram(diagram, 384, 174, measure=fake_measure, max_height=324)
+    for node, label in enumerate(diagram.nodes):
+        words = set(label.split())
+        for line in layout.lines[node]:
+            assert set(line.split()) <= words, (label, layout.lines[node])
+
+
+def test_last_resort_picks_the_direction_that_shows_the_most_text():
+    diagram = parse_diagram(" -> ".join(f"long stage name number {index}" for index in range(8)))
+    layout = layout_diagram(diagram, 384, 174, measure=fake_measure, max_height=324)
+    assert not layout.horizontal  # eight 37 px columns would cut every label
+    for node, label in enumerate(diagram.nodes):
+        assert " ".join(layout.lines[node]) == label

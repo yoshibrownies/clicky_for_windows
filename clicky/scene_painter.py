@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QPolygonF, QTransform
 
 from clicky.fonts import mono_font, ui_font
 from clicky.scene import DrawItem, Scene
@@ -76,6 +76,47 @@ def _color(name: str, alpha: float = 1.0) -> QColor:
     return color
 
 
+ICON_FILL_ALPHA = 0.14  # icons get a soft wash of their colour unless a fill is given
+PATH_FILL_ALPHA = 0.35
+FIGURE_PEN_WIDTH = 2.6
+
+
+def _fill_color(item: DrawItem, default_alpha: float) -> QColor | None:
+    """The brush for a fillable shape: its `fill` colour, nothing for "none", or its own colour at default_alpha."""
+    if item.fill == "none":
+        return None
+    if item.fill:
+        color = _color(item.fill, item.alpha)
+        color.setAlphaF(color.alphaF() * max(default_alpha, PATH_FILL_ALPHA))
+        return color
+    if default_alpha <= 0:
+        return None
+    color = _color(item.color, item.alpha)
+    color.setAlphaF(color.alphaF() * default_alpha)
+    return color
+
+
+def figure_pixel_points(item: DrawItem, mapper: WorldMapper) -> list[list[QPointF]]:
+    """A path's or icon's outline in pixels: scaled uniformly (by the y axis), rotated counter-clockwise, then
+    placed at (x, y)."""
+    anchor_x, anchor_y = mapper.to_pixel(item.values["x"], item.values["y"])
+    size = item.values.get("size", item.values.get("scale", 1.0))
+    pixel_scale = max(-PIXEL_LIMIT, min(PIXEL_LIMIT, size * mapper.scale_y))
+    angle = math.radians(item.values.get("rotate", 0.0))
+    cos_a, sin_a = math.cos(angle), math.sin(angle)
+    outlines: list[list[QPointF]] = []
+    for segment in item.segments:
+        outline = []
+        for local_x, local_y in segment:
+            rotated_x = local_x * cos_a - local_y * sin_a
+            rotated_y = local_x * sin_a + local_y * cos_a
+            pixel_x = max(-PIXEL_LIMIT, min(PIXEL_LIMIT, anchor_x + rotated_x * pixel_scale))
+            pixel_y = max(-PIXEL_LIMIT, min(PIXEL_LIMIT, anchor_y - rotated_y * pixel_scale))
+            outline.append(QPointF(pixel_x, pixel_y))
+        outlines.append(outline)
+    return outlines
+
+
 HIGHLIGHT_SECONDS = 3.0
 HIGHLIGHT_GROW_SECONDS = 0.4
 HIGHLIGHT_FADE_SECONDS = 0.4
@@ -104,6 +145,12 @@ class ScenePainter:
         self.focus_point = None
         self.highlight_rect = None
         self._paint_scene(painter, area, scene, t, highlight)
+        if self.focus_point is not None:
+            # The buddy follows this point: keep it inside the panel, whatever the scene's numbers were.
+            self.focus_point = QPointF(
+                max(area.left(), min(area.right(), self.focus_point.x())),
+                max(area.top(), min(area.bottom(), self.focus_point.y())),
+            )
 
     def _plot_rect(self, board: QRectF, scene: Scene) -> QRectF:
         left_margin = 58 if scene.axes else 20
@@ -253,8 +300,13 @@ class ScenePainter:
         if item.kind in ("circle", "point"):
             center = QPointF(*mapper.to_pixel(values["x"], values["y"]))
             radius = max(1.0, min(80.0, values.get("r", 10.0)))
-            painter.setPen(QPen(QColor(255, 255, 255, int(230 * item.alpha)), 1.6))
-            painter.setBrush(color)
+            if item.fill:
+                brush = _fill_color(item, 1.0)
+                painter.setPen(QPen(color, 2))
+                painter.setBrush(brush if brush is not None else Qt.BrushStyle.NoBrush)
+            else:
+                painter.setPen(QPen(QColor(255, 255, 255, int(230 * item.alpha)), 1.6))
+                painter.setBrush(color)
             painter.drawEllipse(center, radius, radius)
             label_anchor = QPointF(center.x() + radius + 4, center.y() - radius)
             bounds = QRectF(center.x() - radius, center.y() - radius, 2 * radius, 2 * radius)
@@ -264,11 +316,25 @@ class ScenePainter:
             x1, y1 = mapper.to_pixel(values["x"], values["y"])
             x2, y2 = mapper.to_pixel(values["x"] + values["w"], values["y"] + values["h"])
             rect = QRectF(QPointF(min(x1, x2), min(y1, y2)), QPointF(max(x1, x2), max(y1, y2)))
-            fill = QColor(color)
-            fill.setAlphaF(fill.alphaF() * 0.55)
+            fill = _fill_color(item, 0.55)
             painter.setPen(QPen(color, 2))
-            painter.setBrush(fill)
-            painter.drawRoundedRect(rect, 4, 4)
+            painter.setBrush(fill if fill is not None else Qt.BrushStyle.NoBrush)
+            rotation = values.get("rotate", 0.0)
+            if rotation:
+                pivot = {
+                    "bottom-right": rect.bottomRight(),
+                    "center": rect.center(),
+                }.get(item.pivot, rect.bottomLeft())
+                transform = (
+                    QTransform().translate(pivot.x(), pivot.y()).rotate(-rotation).translate(-pivot.x(), -pivot.y())
+                )
+                painter.save()
+                painter.setTransform(transform, True)
+                painter.drawRoundedRect(rect, 4, 4)
+                painter.restore()
+                rect = transform.mapRect(rect)
+            else:
+                painter.drawRoundedRect(rect, 4, 4)
             label_anchor = QPointF(rect.left(), rect.top() - 6)
             bounds = rect
         elif item.kind == "line":
@@ -304,6 +370,41 @@ class ScenePainter:
             painter.drawText(baseline, item.text)
             text_rect = QFontMetricsF(font).boundingRect(item.text)
             bounds = text_rect.translated(baseline)
+        elif item.kind in ("path", "icon"):
+            outlines = [outline for outline in figure_pixel_points(item, mapper) if len(outline) > 1]
+            if outlines:
+                fill = _fill_color(item, ICON_FILL_ALPHA if item.kind == "icon" else 0.0)
+                draw_progress = max(0.0, min(1.0, values.get("draw", 1.0)))
+                if fill is not None:
+                    fill.setAlphaF(fill.alphaF() * draw_progress)
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(fill)
+                    for outline in outlines:
+                        closed = len(outline) > 2 and (outline[0] - outline[-1]).manhattanLength() < 0.5
+                        if closed:
+                            shape = QPainterPath()
+                            shape.addPolygon(QPolygonF(outline))
+                            painter.drawPath(shape)
+                painter.setPen(
+                    QPen(
+                        color,
+                        FIGURE_PEN_WIDTH,
+                        Qt.PenStyle.SolidLine,
+                        Qt.PenCapStyle.RoundCap,
+                        Qt.PenJoinStyle.RoundJoin,
+                    )
+                )
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                for outline in outlines:
+                    painter.drawPolyline(QPolygonF(outline))
+                all_points = [point for outline in outlines for point in outline]
+                xs = [point.x() for point in all_points]
+                ys = [point.y() for point in all_points]
+                bounds = QRectF(QPointF(min(xs), min(ys)), QPointF(max(xs), max(ys)))
+                label_anchor = QPointF(bounds.right() + 4, bounds.top() + 12)
+                if self.focus_point is None:
+                    # While an outline sketches itself in, the pen is at its newest point.
+                    self.focus_point = QPointF(outlines[-1][-1]) if draw_progress < 1.0 else bounds.center()
         elif item.kind == "plot":
             painter.setPen(
                 QPen(

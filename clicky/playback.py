@@ -7,9 +7,14 @@ import os
 import tempfile
 
 from PySide6.QtCore import QObject, QUrl, Signal
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimedia import QAudioDevice, QAudioOutput, QMediaDevices, QMediaPlayer
 
 logger = logging.getLogger(__name__)
+
+
+def default_audio_output() -> QAudioDevice:
+    """Windows' current default playback device (it changes when you plug headphones in or out)."""
+    return QMediaDevices.defaultAudioOutput()
 
 
 def progress_fraction(position_ms: int, duration_ms: int) -> float | None:
@@ -39,6 +44,10 @@ class SpeechPlayer(QObject):
         self._player.positionChanged.connect(self._on_position_changed)
         self._current_file_path: str | None = None
         self._is_playing = False
+        # A QAudioOutput keeps the device that was the default when it was made, so a Clicky started on the speakers
+        # would stay silent in headphones plugged in later. Follow the default as it changes, and re-check it per reply.
+        self._media_devices = QMediaDevices(self)
+        self._media_devices.audioOutputsChanged.connect(self._use_default_output_device)
 
     @property
     def is_playing(self) -> bool:
@@ -46,6 +55,7 @@ class SpeechPlayer(QObject):
 
     def play(self, mp3_audio: bytes) -> None:
         self.stop()
+        self._use_default_output_device()
         # A temp file is the most reliable source across Qt's Windows media backends.
         file_descriptor, file_path = tempfile.mkstemp(prefix="clicky-reply-", suffix=".mp3")
         with os.fdopen(file_descriptor, "wb") as mp3_file:
@@ -61,6 +71,9 @@ class SpeechPlayer(QObject):
             return
         self._player.stop()
         self._finish()
+
+    def _use_default_output_device(self) -> None:
+        self._audio_output.setDevice(default_audio_output())
 
     def _finish(self) -> None:
         if not self._is_playing:

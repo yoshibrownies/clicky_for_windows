@@ -14,6 +14,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from clicky.expressions import compile_formula
+from clicky.icons import icon_subpaths
+from clicky.paths import Subpaths, parse_path_data, partial_subpaths
 
 MAX_SCENE_TEXT_LENGTH = 20_000
 MAX_OBJECTS = 40
@@ -43,7 +45,12 @@ DEFAULT_COLORS = {
     "arrow": "red",
     "text": "black",
     "plot": "green",
+    "path": "black",
+    "icon": "black",
 }
+FILL_CHOICES = (*PALETTE, "none")
+PIVOTS = ("bottom-left", "bottom-right", "center")
+FILLABLE_KINDS = ("rect", "circle", "path", "icon")
 REQUIRED_NUMBERS = {
     "circle": ("x", "y"),
     "point": ("x", "y"),
@@ -52,8 +59,18 @@ REQUIRED_NUMBERS = {
     "arrow": ("x", "y", "dx", "dy"),
     "text": ("x", "y"),
     "plot": ("from", "to"),
+    "path": ("x", "y"),
+    "icon": ("x", "y"),
 }
-OPTIONAL_NUMBERS = {"circle": {"r": 10.0}, "point": {"r": 4.0}, "text": {"size": 15.0}}
+# Paths and icons keep their shape: their sizes are in the y axis's units, and the painter scales them uniformly.
+OPTIONAL_NUMBERS = {
+    "circle": {"r": 10.0},
+    "point": {"r": 4.0},
+    "text": {"size": 15.0},
+    "rect": {"rotate": 0.0},
+    "path": {"scale": 1.0, "rotate": 0.0, "draw": 1.0},
+    "icon": {"size": 1.0, "rotate": 0.0, "draw": 1.0},
+}
 
 NumberValue = Callable[[float, float], "float | None"]
 
@@ -143,6 +160,10 @@ class SceneObject:
     start: float = 0.0
     end: float | None = None
     plot_function: NumberValue | None = None
+    subpaths: Subpaths | None = None  # path and icon outlines, untransformed
+    fill: Callable[[float], str] | None = None
+    pivot: str = "bottom-left"
+    opacity: NumberValue | None = None
 
 
 @dataclass
@@ -156,6 +177,8 @@ class DrawItem:
     dashed: bool = False
     trail: list[tuple[float, float]] = field(default_factory=list)
     segments: list[list[tuple[float, float]]] = field(default_factory=list)
+    fill: str = ""  # a palette colour, "none", or "" for the kind's usual look
+    pivot: str = "bottom-left"
 
 
 @dataclass
@@ -173,6 +196,17 @@ class Scene:
             if t >= start:
                 current = (text, min(1.0, (t - start) / CAPTION_FADE_SECONDS))
         return current
+
+    def has_label(self, label: str) -> bool:
+        """Whether an object is called `label` (its label, or a text object's text at the start or end)."""
+        wanted = label.casefold().strip()
+        for scene_object in self.objects:
+            texts = [scene_object.label]
+            if scene_object.text is not None:
+                texts += [scene_object.text(0.0), scene_object.text(self.duration)]
+            if wanted in (text.casefold().strip() for text in texts):
+                return True
+        return False
 
     def frame(self, t: float) -> list[DrawItem]:
         items: list[DrawItem] = []
@@ -196,6 +230,9 @@ def _visibility(scene_object: SceneObject, t: float) -> float:
 
 def _draw_object(scene_object: SceneObject, t: float) -> DrawItem | None:
     alpha = _visibility(scene_object, t)
+    if scene_object.opacity is not None:
+        opacity = scene_object.opacity(t, 0.0)
+        alpha *= 0.0 if opacity is None else max(0.0, min(1.0, opacity))
     if alpha <= 0:
         return None
     values: dict[str, float] = {}
@@ -212,7 +249,11 @@ def _draw_object(scene_object: SceneObject, t: float) -> DrawItem | None:
         text=scene_object.text(t) if scene_object.text else "",
         label=scene_object.label,
         dashed=scene_object.dashed,
+        fill=scene_object.fill(t) if scene_object.fill else "",
+        pivot=scene_object.pivot,
     )
+    if scene_object.subpaths is not None:
+        item.segments = partial_subpaths(scene_object.subpaths, max(0.0, min(1.0, values.get("draw", 1.0))))
     if scene_object.trail and "x" in scene_object.numbers and "y" in scene_object.numbers:
         trail_start = max(0.0, scene_object.start)
         for index in range(TRAIL_SAMPLES + 1):
@@ -243,7 +284,7 @@ def _parse_object(raw) -> SceneObject | None:
     if not isinstance(raw, dict):
         return None
     kind = raw.get("type")
-    if kind not in REQUIRED_NUMBERS:
+    if not isinstance(kind, str) or kind not in REQUIRED_NUMBERS:
         return None
     numbers: dict[str, NumberValue] = {}
     for name in REQUIRED_NUMBERS[kind]:
@@ -262,6 +303,18 @@ def _parse_object(raw) -> SceneObject | None:
         text = _stepped_text_property(raw.get("text"), MAX_TEXT_LENGTH)
         if text is None:
             return None
+    subpaths = None
+    if kind == "path":
+        subpaths = parse_path_data(raw.get("d"))
+        if subpaths is None:
+            return None
+    elif kind == "icon":
+        subpaths = icon_subpaths(raw.get("name"))
+        if subpaths is None:
+            return None
+    fill = _stepped_text_property(raw["fill"], 12, FILL_CHOICES) if kind in FILLABLE_KINDS and "fill" in raw else None
+    pivot = raw.get("pivot") if raw.get("pivot") in PIVOTS else "bottom-left"
+    opacity = _number_property(raw["opacity"]) if "opacity" in raw else None
     plot_function = None
     if kind == "plot":
         formula = compile_formula(raw.get("fn")) if isinstance(raw.get("fn"), str) else None
@@ -284,6 +337,10 @@ def _parse_object(raw) -> SceneObject | None:
         start=max(0.0, start),
         end=end,
         plot_function=plot_function,
+        subpaths=subpaths,
+        fill=fill,
+        pivot=pivot,
+        opacity=opacity,
     )
 
 

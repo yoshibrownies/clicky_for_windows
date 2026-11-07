@@ -73,3 +73,116 @@ def test_scene_painter_draws_into_any_rect_and_reports_a_focus_point(qt_app):
     assert painted > 100
     assert scene_painter.focus_point is not None
     assert 20 <= scene_painter.focus_point.x() <= 480 and 20 <= scene_painter.focus_point.y() <= 300
+
+
+def illustrated_scene():
+    return parse_scene(
+        json.dumps(
+            {
+                "duration": 4,
+                "world": {"x": [0, 10], "y": [0, 10]},
+                "objects": [
+                    {"type": "icon", "name": "person", "x": 2, "y": 1, "size": 6, "label": "you", "fill": "blue"},
+                    {"type": "icon", "name": "gear", "x": 7, "y": 5, "size": 4, "rotate": 20, "draw": "t/2"},
+                    {"type": "path", "d": "M 0 0 C 1 2 2 2 3 0 Z", "x": 5, "y": 1, "fill": "orange", "label": "hill"},
+                    {"type": "rect", "x": 4, "y": 0, "w": 0.5, "h": 3, "rotate": -60, "pivot": "bottom-right"},
+                    {"type": "circle", "x": 9, "y": 9, "fill": "none"},
+                ],
+            }
+        )
+    )
+
+
+def paint_to_image(scene, t, highlight=None):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    from clicky.scene_painter import ScenePainter
+
+    image = QImage(420, 260, QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    scene_painter = ScenePainter()
+    scene_painter.paint(painter, QRectF(0, 0, 420, 260), scene, t, highlight)
+    painter.end()
+    return image, scene_painter
+
+
+def test_icons_paths_and_rotated_shapes_paint(qt_app):
+    image, scene_painter = paint_to_image(illustrated_scene(), 1.0)
+    painted = sum(1 for x in range(0, 420, 4) for y in range(0, 260, 4) if image.pixelColor(x, y).alpha() > 0)
+    assert painted > 150
+    assert scene_painter.focus_point is not None  # the gear is still being sketched: the pen is its head
+
+
+def test_highlight_finds_an_icon_by_label(qt_app):
+    _, scene_painter = paint_to_image(illustrated_scene(), 3.0, highlight=("you", 0.5))
+    ring = scene_painter.highlight_rect
+    assert ring is not None
+    assert ring.center().x() < 210  # the person stands on the left
+
+
+def test_a_rotated_rect_is_drawn_where_it_has_tipped_to(qt_app):
+    upright = parse_scene(
+        json.dumps(
+            {
+                "world": {"x": [0, 10], "y": [0, 10]},
+                "objects": [{"type": "rect", "x": 5, "y": 0, "w": 0.4, "h": 8, "color": "red"}],
+            }
+        )
+    )
+    tipped = parse_scene(
+        json.dumps(
+            {
+                "world": {"x": [0, 10], "y": [0, 10]},
+                "objects": [
+                    {
+                        "type": "rect",
+                        "x": 5,
+                        "y": 0,
+                        "w": 0.4,
+                        "h": 8,
+                        "color": "red",
+                        "rotate": -90,
+                        "pivot": "bottom-right",
+                    }
+                ],
+            }
+        )
+    )
+    upright_image, _ = paint_to_image(upright, 0)
+    tipped_image, _ = paint_to_image(tipped, 0)
+
+    def red_columns(image):
+        return {x for x in range(420) for y in range(0, 260, 3) if image.pixelColor(x, y).red() > 150}
+
+    assert max(red_columns(tipped_image)) - min(red_columns(tipped_image)) > 3 * (
+        max(red_columns(upright_image)) - min(red_columns(upright_image))
+    )
+
+
+def test_huge_paths_never_send_the_pen_off_into_space(qt_app):
+    from clicky.scene_painter import PIXEL_LIMIT
+
+    huge = parse_scene(
+        json.dumps(
+            {
+                "world": {"x": [0, 10], "y": [0, 10]},
+                "objects": [
+                    {
+                        "type": "path",
+                        "d": "M0 0 l1000000 1000000 l1000000 -1000000",
+                        "x": 1,
+                        "y": 1,
+                        "scale": 1e9,
+                        "draw": 0.5,
+                    }
+                ],
+            }
+        )
+    )
+    _, scene_painter = paint_to_image(huge, 0)
+    point = scene_painter.focus_point
+    assert point is not None
+    assert 0 <= point.x() <= 420 and 0 <= point.y() <= 260  # kept inside the animation panel
+    assert PIXEL_LIMIT == 10_000.0

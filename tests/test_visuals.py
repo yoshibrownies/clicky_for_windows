@@ -131,13 +131,24 @@ def test_scene_block_can_come_before_the_marker_and_json_brackets_are_fine():
     assert reply.events[0].kind == "animate" and reply.events[0].text == scene
 
 
-def test_marker_without_a_block_and_extra_animations_are_dropped():
+def test_marker_without_a_block_is_dropped_and_several_animations_play_in_order():
     reply = parse_visual_reply(
         f'one [ANIMATE:a] two [ANIMATE:missing] three [ANIMATE:b] <scene name="a">{SCENE_JSON}</scene>'
         f'<scene name="b">{SCENE_JSON}</scene>'
     )
-    assert [event.kind for event in reply.events] == ["animate"]
+    assert [event.kind for event in reply.events] == ["animate", "animate"]
+    assert reply.events[0].fraction < reply.events[1].fraction
     assert reply.spoken_text == "one two three"
+
+
+def test_animations_beyond_the_limit_are_dropped():
+    from clicky.visuals import MAX_ANIMATIONS
+
+    markers = " ".join(f"step {index} [ANIMATE:s{index}]" for index in range(MAX_ANIMATIONS + 2))
+    blocks = "".join(f'<scene name="s{index}">{SCENE_JSON}</scene>' for index in range(MAX_ANIMATIONS + 2))
+    reply = parse_visual_reply(markers + blocks)
+    assert MAX_ANIMATIONS == 4
+    assert len([event for event in reply.events if event.kind == "animate"]) == MAX_ANIMATIONS
 
 
 def test_unfinished_scene_block_is_never_spoken():
@@ -211,3 +222,54 @@ def test_card_tag_limits_and_lengths():
     assert counts == {"title": 1, "heading": 1, "formula": 3, "followup": 3}
     long_reply = parse_visual_reply("[HEADING:" + "h" * 200 + "] [FOLLOWUP:" + "q" * 200 + "]")
     assert len(long_reply.events[0].text) <= 60 and len(long_reply.events[1].text) <= 40
+
+
+# ---------- heard_part: what you heard before cutting Clicky off ----------
+
+HEARD_REPLY = (
+    "[TITLE:memory] the hippocampus links a memory together. [NOTE:hippocampus = index] "
+    "later the memory moves into the cortex. [ANIMATE:synapse] [NOTE:cortex = long term] [FOLLOWUP:What is LTP?]"
+)
+
+
+def test_heard_part_is_everything_once_speech_finished():
+    from clicky.visuals import heard_part
+
+    assert heard_part(HEARD_REPLY, 1.0) == HEARD_REPLY
+
+
+def test_heard_part_is_empty_before_any_speech():
+    from clicky.visuals import heard_part
+
+    assert heard_part(HEARD_REPLY, 0.0) == ""
+    assert heard_part("[TITLE:memory] hello there", 0.0) == ""
+
+
+def test_heard_part_keeps_marks_already_shown_and_drops_later_ones():
+    from clicky.visuals import heard_part
+
+    heard = heard_part(HEARD_REPLY, 0.6)
+    assert heard.startswith("[TITLE:memory] the hippocampus links a memory together. [NOTE:hippocampus = index]")
+    assert "[ANIMATE:synapse]" not in heard
+    assert "cortex = long term" not in heard
+    assert "FOLLOWUP" not in heard
+
+
+def test_heard_part_finishes_the_word_being_spoken():
+    from clicky.visuals import heard_part
+
+    text = "alpha bravo charlie delta"
+    # 25 characters; 0.3 lands inside "bravo" (characters 6-10).
+    assert heard_part(text, 0.3) == "alpha bravo"
+
+
+def test_heard_part_drops_follow_ups_unless_the_end_was_heard():
+    from clicky.visuals import heard_part
+
+    assert heard_part("one two three [FOLLOWUP:more?]", 0.99).endswith("three")
+
+
+def test_heard_part_does_not_add_the_next_word_when_cut_between_words():
+    from clicky.visuals import heard_part
+
+    assert heard_part("alpha bravo charlie delta", 5.2 / 25) == "alpha"

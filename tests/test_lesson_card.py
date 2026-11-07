@@ -210,3 +210,192 @@ def test_height_cap_leaves_room_for_the_follow_up_chips(qt_app):
         assert 56 + card._height_cap() + 8 + chips_height <= available.height()
     finally:
         card.close()
+
+
+def test_highlight_rings_the_newest_animation_that_has_that_object(qt_app):
+    import json
+
+    from clicky.scene import parse_scene
+
+    def labelled_scene(label):
+        return parse_scene(json.dumps({"duration": 2, "objects": [{"type": "circle", "x": 1, "y": 1, "label": label}]}))
+
+    card = make_card()
+    try:
+        card.start_reply()
+        card.play_animation(labelled_scene("first cause"))
+        card.play_animation(labelled_scene("you"))
+        card.highlight("first cause")  # mentioned again while the later picture is up
+        assert card._highlight is not None and card._highlight[2].scene.objects[0].label == "first cause"
+        card.highlight("you")
+        assert card._highlight[2].scene.objects[0].label == "you"
+        card.highlight("nowhere")  # unknown labels still go to the newest picture (it may be a text object)
+        assert card._highlight[2].scene.objects[0].label == "you"
+    finally:
+        card.close()
+
+
+def test_a_diagram_with_long_labels_gets_a_taller_block_and_keeps_every_word(qt_app):
+    card = make_card()
+    try:
+        card.start_reply()
+        card.set_diagram(
+            "sensory input arrives -> attention filters it -> working memory holds it -> sleep consolidates it"
+        )
+        block = card._blocks[-1]
+        assert 190 < block.height <= 340
+        layout = block.diagram_layout
+        assert layout is not None
+        for node, label in enumerate(block.diagram.nodes):
+            assert " ".join(layout.lines[node]) == label  # wrapped, never cut
+    finally:
+        card.close()
+
+
+# ---------- finished animations become still pictures ----------
+
+
+def _dot_scene():
+    import json
+
+    from clicky.scene import parse_scene
+
+    return parse_scene(
+        json.dumps(
+            {
+                "duration": 1,
+                "world": {"x": [0, 10], "y": [0, 10]},
+                "objects": [{"type": "circle", "x": 5, "y": 5, "r": 30, "color": "red", "label": "dot"}],
+            }
+        )
+    )
+
+
+def _paint_block(card, block, now):
+    from PySide6.QtGui import QImage, QPainter
+
+    image = QImage(card.width(), card.height(), QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    card._paint_animation(painter, block, 60.0, now)
+    painter.end()
+    return image
+
+
+def _counting_frames(scene):
+    calls = []
+    original = scene.frame
+
+    def counted(t):
+        calls.append(t)
+        return original(t)
+
+    scene.frame = counted
+    return calls
+
+
+def test_a_finished_animation_is_drawn_from_a_still_picture(qt_app):
+    card = make_card()
+    try:
+        card.start_reply()
+        card.play_animation(_dot_scene())
+        block = card._blocks[-1]
+        calls = _counting_frames(block.scene)
+        done = block.starts_at + 2.0
+        _paint_block(card, block, done)
+        assert block.still is not None
+        calls.clear()
+        _paint_block(card, block, done + 0.5)
+        assert calls == []  # not re-evaluated: the still picture was drawn
+    finally:
+        card.close()
+
+
+def test_a_highlight_on_a_finished_animation_paints_live(qt_app):
+    import time
+
+    card = make_card()
+    try:
+        card.start_reply()
+        card.play_animation(_dot_scene())
+        block = card._blocks[-1]
+        block.starts_at = time.monotonic() - 5.0  # long finished
+        _paint_block(card, block, time.monotonic())
+        assert block.still is not None
+        calls = _counting_frames(block.scene)
+        card.highlight("dot")
+        _paint_block(card, block, time.monotonic() + 0.5)
+        assert calls, "a ringed animation paints live so the ring can follow its object"
+        assert card._scene_painter.highlight_rect is not None
+    finally:
+        card.close()
+
+
+def test_the_still_picture_looks_like_the_live_drawing(qt_app):
+    card = make_card()
+    try:
+        card.start_reply()
+        card.play_animation(_dot_scene())
+        block = card._blocks[-1]
+        live = _paint_block(card, block, block.starts_at + block.scene.duration - 1e-3 + 0.0)  # last live frame
+        block.still = None
+        still = _paint_block(card, block, block.starts_at + 3.0)
+        different = 0
+        samples = 0
+        for x in range(0, card.width(), 4):
+            for y in range(0, card.height(), 4):
+                a, b = live.pixelColor(x, y), still.pixelColor(x, y)
+                samples += 1
+                if (
+                    max(
+                        abs(a.red() - b.red()),
+                        abs(a.green() - b.green()),
+                        abs(a.blue() - b.blue()),
+                        abs(a.alpha() - b.alpha()),
+                    )
+                    > 8
+                ):
+                    different += 1
+        assert different / samples < 0.02
+    finally:
+        card.close()
+
+
+def test_the_still_picture_is_reused_at_fractional_scaling_and_redrawn_when_scaling_changes(qt_app):
+    card = make_card()
+    try:
+        card.start_reply()
+        card.play_animation(_dot_scene())
+        block = card._blocks[-1]
+        renders = []
+        original_render = card._render_still
+        card._render_still = lambda scene, area: renders.append(1) or original_render(scene, area)
+        ratio = {"value": 1.25}  # 125% display scaling, the usual Windows laptop setting
+        card.devicePixelRatioF = lambda: ratio["value"]
+        done = block.starts_at + 2.0
+        _paint_block(card, block, done)
+        _paint_block(card, block, done + 0.1)
+        assert len(renders) == 1
+        ratio["value"] = 2.0  # dragged onto a 200% monitor
+        _paint_block(card, block, done + 0.2)
+        assert len(renders) == 2
+    finally:
+        card.close()
+
+
+def test_an_animation_goes_back_to_its_still_picture_once_the_ring_has_faded(qt_app):
+    import time
+
+    card = make_card()
+    try:
+        card.start_reply()
+        card.play_animation(_dot_scene())
+        block = card._blocks[-1]
+        block.starts_at = time.monotonic() - 20.0
+        card._highlight = ("dot", time.monotonic() - 10.0, block)  # ringed long ago; the ring is gone
+        _paint_block(card, block, time.monotonic())
+        calls = _counting_frames(block.scene)
+        _paint_block(card, block, time.monotonic())
+        assert block.still is not None and calls == []
+    finally:
+        card.close()

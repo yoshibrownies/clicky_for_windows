@@ -30,6 +30,7 @@ from clicky.scene import parse_scene
 from clicky.screens import capture_all_screens
 from clicky.services import WorkerServices
 from clicky.status_pill import StatusPill
+from clicky.system_voice import SystemVoice, VoiceOutput
 from clicky.tray import ClickyTray
 from clicky.visual_director import VisualDirector
 
@@ -104,8 +105,8 @@ def mask_worker_url(worker_url: str) -> str:
 def build_clear_controls(director, annotation_layer, card, chips, overlay):
     """(clear_all, something_visible) for the Esc key and the tray's Clear screen item.
 
-    Clearing removes every mark, the lesson card, the follow-up chips and the speech bubble at once. Speech keeps
-    playing: clearing the screen shouldn't cut off an answer you're listening to (talking over Clicky does that).
+    Clearing removes every mark, the lesson card, the follow-up chips and the speech bubble at once. The tray's
+    Clear screen leaves speech playing; Esc also stops it (see build_escape_handler).
     """
 
     def clear_all() -> None:
@@ -121,6 +122,17 @@ def build_clear_controls(director, annotation_layer, card, chips, overlay):
         return bool(annotation_layer.visible_windows() or card.isVisible() or chips.isVisible() or overlay.has_bubble)
 
     return clear_all, something_visible
+
+
+def build_escape_handler(controller, clear_all, something_visible):
+    """Esc stops Clicky talking (or an answer on its way) and clears whatever it has drawn."""
+
+    def handle_escape() -> None:
+        controller.stop_speaking()
+        if something_visible():
+            clear_all()
+
+    return handle_escape
 
 
 def chips_anchor(card) -> QRect:
@@ -179,7 +191,8 @@ def main() -> int:
 
     runner = AsyncRunner()
     services = WorkerServices(settings)
-    player = SpeechPlayer()
+    # ElevenLabs MP3s, with Windows' own voice as the fallback when they can't be fetched (e.g. credits used up).
+    player = VoiceOutput(SpeechPlayer(), SystemVoice())
     overlay = BuddyOverlay()
     controller = CompanionController(
         runner=runner,
@@ -271,6 +284,8 @@ def main() -> int:
 
     controller.point_requested.connect(point_at)
     player.finished.connect(controller.handle_playback_finished)
+    player.failed.connect(controller.handle_voice_failed)
+    player.progress.connect(controller.handle_playback_progress)  # where you'd got to, if you cut it off
 
     # Underlines, circles and the lesson card, timed to the speech.
     controller.visuals_ready.connect(visual_director.start)
@@ -317,13 +332,9 @@ def main() -> int:
     tray.clear_requested.connect(clear_all)
     escape_bridge = KeyTapBridge()
 
-    def clear_on_escape() -> None:
-        if something_visible():
-            clear_all()
-
-    escape_bridge.tapped.connect(clear_on_escape)
+    escape_bridge.tapped.connect(build_escape_handler(controller, clear_all, something_visible))
     escape_watcher = KeyTapWatcher(VK_ESCAPE, escape_bridge.tapped.emit)
-    tray.forget_requested.connect(controller.history.clear)
+    tray.forget_requested.connect(controller.forget)
     tray.forget_requested.connect(lambda: overlay.show_notice("okay, fresh start."))
 
     hotkey_bridge = HotkeyBridge()

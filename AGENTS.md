@@ -26,7 +26,18 @@ Python 3.13 + PySide6 port of farzaa/clicky. Read `docs/design.md` before changi
 - Animations: the model writes `[ANIMATE:name]` plus a `<scene name="name">{json}</scene>` block (`visuals.py`).
   Formulas go ONLY through `expressions.compile_formula` (whitelisted recursive-descent parser) — never `eval`/`exec`.
   Every scene example in `prompts.py` must parse (tested). Design: `docs/superpowers/specs/2026-11-06-animations-and-clear-design.md`.
-- Clearing: Esc (`KeyTapWatcher`) and tray "Clear screen" call `build_clear_controls` in `app.py`; speech keeps playing.
+- Illustrations: scenes also draw `path` (SVG path data via `paths.parse_path_data`, whitelisted, never raises) and `icon`
+  (`icons.py` library); up to `MAX_ANIMATIONS` (4) scenes per reply, one per step of the explanation. Prompt icon names must
+  match `icons.ICON_NAMES` (tested). Stay general: no topic-specific icons or worked examples (Yoshi: "do not overfit");
+  subject-specific drawings come from the model's own `path` sketches. Design: `docs/superpowers/specs/2026-11-07-illustrated-explanations-design.md`.
+- Voice: `VoiceOutput` (`system_voice.py`) plays ElevenLabs MP3s and falls back to Windows' own voice (Qt
+  `QTextToSpeech`, word progress) when the voice can't be fetched; after `quota_exceeded` ElevenLabs isn't asked again
+  until restart. Tests use the silent `mock` engine. Design: `docs/superpowers/specs/2026-11-07-system-voice-fallback-design.md`.
+- History holds only what you heard: a reply is added when speech ends, or cut at playback progress
+  (`visuals.heard_part`) plus `prompts.CUT_OFF_MARKER` when interrupted.
+  Design: `docs/superpowers/specs/2026-11-07-interrupt-awareness-design.md`.
+- Clearing: Esc (`KeyTapWatcher`) and tray "Clear screen" call `build_clear_controls` in `app.py`. Esc also stops speech (and an answer still on its way) via
+  `CompanionController.stop_speaking`; the tray item leaves speech playing. Esc never cancels listening.
 - Lesson card (`lesson_card.py`) replaced the notepad and whiteboard. Follow-up chips (`followup_chips.py`) and the card
   (drag by title bar, x to close, wheel to scroll) are the only clickable windows; they must never take keyboard focus.
   The card glides away from screen marks (`LessonCard.avoid`). Design: `docs/superpowers/specs/2026-11-06-movable-card-design.md`. Typed questions go through `CompanionController.ask_typed`.

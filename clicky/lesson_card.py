@@ -25,12 +25,13 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QPixmap,
     QPolygonF,
 )
 from PySide6.QtWidgets import QWidget
 
 from clicky.animation import ease_in_out
-from clicky.diagram import Diagram, layout_diagram, parse_diagram
+from clicky.diagram import LABEL_LINE_HEIGHT, Diagram, DiagramLayout, layout_diagram, parse_diagram
 from clicky.followup_chips import chips_reserve
 from clicky.fonts import mono_font, ui_font
 from clicky.handwriting import typed_characters, wrap_text
@@ -52,6 +53,7 @@ BLOCK_GAP = 10
 NOTE_INDENT = 18
 EMPTY_CONTENT_HEIGHT = 60
 DIAGRAM_BLOCK_HEIGHT = 190
+MAX_DIAGRAM_BLOCK_HEIGHT = 340  # a diagram with wrapped labels grows up to this
 ANIMATION_BLOCK_HEIGHT = 250
 BLOCK_FADE_SECONDS = 0.25
 ANIMATION_REVEAL_SECONDS = 0.6
@@ -96,6 +98,9 @@ class _Block:
     height: float
     lines: list[str]
     diagram: Diagram | None = None
+    diagram_layout: DiagramLayout | None = None  # worked out once, with labels wrapped to fit
+    still: QPixmap | None = None  # a finished animation, drawn once and reused instead of repainting
+    still_key: tuple[float, float, float] | None = None  # (width, height, pixel ratio) the still was drawn for
     scene: Scene | None = None
 
     def progress(self, now: float) -> float:
@@ -229,7 +234,17 @@ class LessonCard(QWidget):
         if not diagram.nodes:
             return
         reveal = len(diagram.nodes) * NODE_APPEAR_SECONDS + len(diagram.edges) * EDGE_DRAW_SECONDS
-        self._append(_Block("diagram", spec, self._next_start(), reveal, DIAGRAM_BLOCK_HEIGHT, [], diagram=diagram))
+        # Labels wrap (and only then shrink) to stay whole; the block grows to hold the taller boxes.
+        layout = layout_diagram(
+            diagram,
+            self._diagram_area(0.0).width(),
+            DIAGRAM_BLOCK_HEIGHT - 16,
+            measure=QFontMetricsF(self._label_font).horizontalAdvance,
+            max_height=MAX_DIAGRAM_BLOCK_HEIGHT - 16,
+        )
+        height = max(DIAGRAM_BLOCK_HEIGHT, min(MAX_DIAGRAM_BLOCK_HEIGHT, layout.needed_height + 16))
+        block = _Block("diagram", spec, self._next_start(), reveal, height, [], diagram=diagram, diagram_layout=layout)
+        self._append(block)
 
     def play_animation(self, scene: Scene | None) -> None:
         if not self._accepting or scene is None:
@@ -319,9 +334,12 @@ class LessonCard(QWidget):
         return self._highlight[0] if self._highlight is not None else None
 
     def highlight(self, label: str) -> None:
-        """Ring the object called `label` in the newest animation, following it as it moves, for a few seconds."""
+        """Ring the object called `label`, following it as it moves, for a few seconds. With several animations it
+        goes to the newest one that has that object (Clicky may point back at an earlier step), else the newest."""
         label = " ".join(label.split())
-        animation = next((block for block in reversed(self._blocks) if block.kind == "animation"), None)
+        animations = [block for block in reversed(self._blocks) if block.kind == "animation"]
+        animation = next((block for block in animations if block.scene and block.scene.has_label(label)), None)
+        animation = animation or (animations[0] if animations else None)
         if not self._accepting or not label or animation is None:
             return
         self._highlight = (label, max(time.monotonic(), animation.starts_at), animation)
@@ -557,8 +575,8 @@ class LessonCard(QWidget):
             if block.kind in TEXT_STYLES:
                 return self._text_pen(block, top, now)
             if block.kind == "diagram" and block.diagram is not None:
-                area = self._diagram_area(top)
-                layout = layout_diagram(block.diagram, area.width(), area.height())
+                area = self._diagram_area(top, block.height)
+                layout = block.diagram_layout or layout_diagram(block.diagram, area.width(), area.height())
                 shown = min(len(block.diagram.nodes) - 1, int((now - block.starts_at) / NODE_APPEAR_SECONDS))
                 x, y, width, height = layout.boxes[max(0, shown)]
                 return QPointF(area.left() + x + width / 2, area.top() + y + height)
@@ -580,11 +598,9 @@ class LessonCard(QWidget):
             remaining -= len(line) + 1
         return QPointF(self._text_left(block), top)
 
-    def _diagram_area(self, top: float) -> QRectF:
+    def _diagram_area(self, top: float, block_height: float = DIAGRAM_BLOCK_HEIGHT) -> QRectF:
         paper = self._paper_rect()
-        return QRectF(
-            paper.left() + PADDING_X - 8, top + 6, paper.width() - 2 * PADDING_X + 16, DIAGRAM_BLOCK_HEIGHT - 16
-        )
+        return QRectF(paper.left() + PADDING_X - 8, top + 6, paper.width() - 2 * PADDING_X + 16, block_height - 16)
 
     def _animation_area(self, top: float) -> QRectF:
         paper = self._paper_rect()
@@ -742,8 +758,8 @@ class LessonCard(QWidget):
     def _paint_diagram(self, painter: QPainter, block: _Block, top: float, now: float) -> None:
         diagram = block.diagram
         assert diagram is not None
-        area = self._diagram_area(top)
-        layout = layout_diagram(diagram, area.width(), area.height())
+        area = self._diagram_area(top, block.height)
+        layout = block.diagram_layout or layout_diagram(diagram, area.width(), area.height())
         elapsed = now - block.starts_at
         node_count = len(diagram.nodes)
         for edge_index, (source, target) in enumerate(diagram.edges):
@@ -777,8 +793,11 @@ class LessonCard(QWidget):
                 painter.drawPath(path)
                 if progress >= 1.0:
                     self._paint_arrowhead(painter, control, end)
-        painter.setFont(self._label_font)
-        label_metrics = QFontMetricsF(self._label_font)
+        label_font = self._label_font
+        if layout.font_scale < 1.0:
+            label_font = ui_font(max(11, round(13 * layout.font_scale)), QFont.Weight.Medium)
+        painter.setFont(label_font)
+        line_height = LABEL_LINE_HEIGHT * layout.font_scale
         for node_index, label in enumerate(diagram.nodes):
             appear = (elapsed - node_index * NODE_APPEAR_SECONDS) / NODE_APPEAR_SECONDS
             if appear <= 0:
@@ -800,11 +819,11 @@ class LessonCard(QWidget):
             painter.setBrush(NODE_FILL)
             painter.drawPath(path)
             painter.setPen(INK_COLOR)
-            painter.drawText(
-                box,
-                Qt.AlignmentFlag.AlignCenter,
-                label_metrics.elidedText(label, Qt.TextElideMode.ElideRight, box.width() - 8),
-            )
+            lines = layout.lines.get(node_index, (label,))
+            lines_top = box.center().y() - len(lines) * line_height / 2
+            for line_index, line in enumerate(lines):
+                line_rect = QRectF(box.left(), lines_top + line_index * line_height, box.width(), line_height)
+                painter.drawText(line_rect, Qt.AlignmentFlag.AlignCenter, line)
             painter.restore()
 
     @staticmethod
@@ -849,14 +868,45 @@ class LessonCard(QWidget):
         assert scene is not None
         area = self._animation_area(top)
         appear = min(1.0, (now - block.starts_at) / BLOCK_FADE_SECONDS)
-        painter.save()
-        painter.setOpacity(painter.opacity() * appear)
+        scene_time = max(0.0, min(scene.duration, now - block.starts_at))
+        highlight = None
+        if self._highlight is not None and self._highlight[2] is block and self._highlight_active(now):
+            highlight = (self._highlight[0], now - self._highlight[1])
+        finished = highlight is None and appear >= 1.0 and now - block.starts_at >= scene.duration
+        if not finished:
+            block.still = None  # playing, fading in or ringed: paint live (re-cached once it settles)
+            painter.save()
+            painter.setOpacity(painter.opacity() * appear)
+            self._paint_animation_contents(painter, area, scene, scene_time, highlight)
+            painter.restore()
+            return
+        # Keyed on the logical size and the screen's pixel ratio: at 125% scaling the pixmap's own size is rounded,
+        # so comparing it to the area would never match, and a move to another monitor needs a sharper picture.
+        still_key = (area.width(), area.height(), self.devicePixelRatioF() or 1.0)
+        if block.still is None or block.still_key != still_key:
+            block.still = self._render_still(scene, area)
+            block.still_key = still_key
+        painter.drawPixmap(area.topLeft(), block.still)
+
+    def _paint_animation_contents(
+        self, painter: QPainter, area: QRectF, scene: Scene, t: float, highlight: tuple[str, float] | None
+    ) -> None:
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(ANIMATION_PANEL)
         painter.drawRoundedRect(area, 12, 12)
-        scene_time = max(0.0, min(scene.duration, now - block.starts_at))
-        highlight = None
-        if self._highlight is not None and self._highlight[2] is block:
-            highlight = (self._highlight[0], now - self._highlight[1])
-        self._scene_painter.paint(painter, area, scene, scene_time, highlight=highlight)
-        painter.restore()
+        self._scene_painter.paint(painter, area, scene, t, highlight=highlight)
+
+    def _render_still(self, scene: Scene, area: QRectF) -> QPixmap:
+        """The animation's last frame as a picture at the screen's pixel ratio (sharp on scaled displays)."""
+        ratio = self.devicePixelRatioF() or 1.0
+        still = QPixmap(max(1, math.ceil(area.width() * ratio)), max(1, math.ceil(area.height() * ratio)))
+        still.setDevicePixelRatio(ratio)
+        still.fill(Qt.GlobalColor.transparent)
+        still_painter = QPainter(still)
+        still_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        still_painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        # Painted at the block's real position, so the painter's focus point stays in card coordinates.
+        still_painter.translate(-area.left(), -area.top())
+        self._paint_animation_contents(still_painter, area, scene, scene.duration, None)
+        still_painter.end()
+        return still

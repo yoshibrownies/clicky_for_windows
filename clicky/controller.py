@@ -27,9 +27,9 @@ from clicky.config import is_openai_model
 from clicky.conversation import ConversationHistory
 from clicky.openai_client import build_openai_chat_request_body
 from clicky.pointing import parse_point_tag
-from clicky.prompts import COMPANION_SYSTEM_PROMPT, REFUSAL_SPOKEN_REPLY
+from clicky.prompts import COMPANION_SYSTEM_PROMPT, CUT_OFF_MARKER, REFUSAL_SPOKEN_REPLY
 from clicky.screens import ScreenCapture, map_image_point_to_screen
-from clicky.visuals import extract_scene_blocks, parse_visual_reply, visible_text
+from clicky.visuals import extract_scene_blocks, heard_part, parse_visual_reply, visible_text
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,10 @@ class VisualPlan:
     has_audio: bool
 
 
+QUOTA_EXCEEDED_CODE = "quota_exceeded"  # ElevenLabs' error code when the monthly credits are used up
+ELEVENLABS_QUOTA_USED_UP = "elevenlabs credits are used up"
+
+
 @dataclass(frozen=True)
 class CompanionReply:
     generation: int
@@ -97,6 +101,9 @@ class CompanionReply:
     speech_audio: bytes | None
     speech_error: str | None
     visual_events: tuple[ScreenVisualEvent, ...] = ()
+    transcript: str = ""
+    remembered_text: str = ""  # the reply for the history: tags kept, scene JSON left out
+    remember: bool = False
 
 
 @dataclass(frozen=True)
@@ -234,6 +241,13 @@ class CompanionController(QObject):
         self._microphone: Microphone | None = None
         self._audio_queue: asyncio.Queue | None = None
         self._interaction_future: concurrent.futures.Future | None = None
+        # The reply being spoken, remembered only once heard: in full, or up to where you cut it off.
+        self._speaking_reply: tuple[str, str] | None = None  # (transcript, remembered_text)
+        self._heard_fraction = 0.0
+        # After ElevenLabs says the credits are used up, don't ask again until Clicky restarts (the Windows voice
+        # speaks instead); other voice errors retry on the next answer.
+        self._skip_elevenlabs = False
+        self._fallback_text = ""  # what the Windows voice is saying, shown as text if it fails too
 
         self._reply_ready.connect(self._on_reply_ready)
         self._interaction_failed.connect(self._on_interaction_failed)
@@ -316,9 +330,40 @@ class CompanionController(QObject):
             self._abort_current_interaction()
             self._set_state(CompanionState.IDLE)
 
+    def stop_speaking(self) -> bool:
+        """Esc: cut off the voice, or drop an answer that is still being prepared. Returns whether anything stopped.
+
+        Leaves listening alone, so Esc never cancels a question you are still asking."""
+        if self.state not in (CompanionState.PROCESSING, CompanionState.RESPONDING):
+            return False
+        self._abort_current_interaction()
+        self._set_state(CompanionState.IDLE)
+        return True
+
+    def forget(self) -> None:
+        """Tray "Forget": clear the history, including the answer being spoken right now (saved only once heard)."""
+        self._speaking_reply = None
+        self.history.clear()
+
+    @Slot(str)
+    def handle_voice_failed(self, message: str) -> None:
+        """The Windows voice couldn't speak either: show the answer as text, as when there was no voice at all."""
+        if self.state is not CompanionState.RESPONDING:
+            return
+        logger.warning("Windows voice failed: %s", message)
+        self._remember_heard(1.0)  # shown in full
+        self._set_state(CompanionState.IDLE)
+        if self._fallback_text:
+            self.notice.emit(self._fallback_text)
+
+    @Slot(float)
+    def handle_playback_progress(self, fraction: float) -> None:
+        self._heard_fraction = max(self._heard_fraction, fraction)
+
     @Slot()
     def handle_playback_finished(self) -> None:
         if self.state is CompanionState.RESPONDING:
+            self._remember_heard(1.0)
             self._set_state(CompanionState.IDLE)
 
     def set_model(self, model: str) -> None:
@@ -376,11 +421,24 @@ class CompanionController(QObject):
         )
         reply_text = ""
         stop_reason: str | None = None
-        async for stream_event in self._services.stream_reply(request_body):
-            if isinstance(stream_event, TextDelta):
-                reply_text += stream_event.text
-            elif isinstance(stream_event, StreamFinished):
-                stop_reason = stream_event.stop_reason
+        # Speech comes before the <scene> blocks, so the voice is fetched as soon as the first block starts instead
+        # of after every animation's JSON has streamed in (several scenes would otherwise mean seconds of silence).
+        early_speech: asyncio.Task | None = None
+        early_text = ""
+        try:
+            async for stream_event in self._services.stream_reply(request_body):
+                if isinstance(stream_event, TextDelta):
+                    reply_text += stream_event.text
+                    if early_speech is None and not self._skip_elevenlabs and "<scene" in reply_text.lower():
+                        early_text = build_visual_plan(reply_text, screen_captures)[0]
+                        if early_text:
+                            early_speech = asyncio.ensure_future(self._services.fetch_speech(early_text))
+                elif isinstance(stream_event, StreamFinished):
+                    stop_reason = stream_event.stop_reason
+        except BaseException:
+            if early_speech is not None:
+                early_speech.cancel()
+            raise
 
         visual_events: tuple[ScreenVisualEvent, ...] = ()
         if stop_reason == "refusal":
@@ -392,18 +450,39 @@ class CompanionController(QObject):
 
         speech_audio: bytes | None = None
         speech_error: str | None = None
+        if early_speech is not None and early_text != spoken_text:
+            early_speech.cancel()  # the words changed after the first scene (or a refusal): fetch the real ones
+            early_speech = None
         try:
-            speech_audio = await self._services.fetch_speech(spoken_text)
+            if early_speech is not None:
+                speech_audio = await early_speech
+            elif self._skip_elevenlabs:
+                speech_error = ELEVENLABS_QUOTA_USED_UP
+            else:
+                speech_audio = await self._services.fetch_speech(spoken_text)
+        except asyncio.CancelledError:
+            if early_speech is not None:
+                early_speech.cancel()
+            raise
         except Exception as tts_error:
             logger.warning("Text-to-speech failed: %s", tts_error)
             speech_error = str(tts_error)
-        # Remembered only now: an answer cut off before it was spoken never happened as far as you know. The scene
-        # JSON is left out (it's big, and the [ANIMATE:name] tag already says an animation was shown).
-        if stop_reason != "refusal":
-            self.history.add(transcript, extract_scene_blocks(reply_text)[0])
-
+            if QUOTA_EXCEEDED_CODE in speech_error:
+                self._skip_elevenlabs = True
+        # Remembered on the GUI thread once heard (see _remember_heard). The scene JSON is left out (it's big, and
+        # the [ANIMATE:name] tag already says an animation was shown).
         self._reply_ready.emit(
-            CompanionReply(generation, spoken_text, point_target, speech_audio, speech_error, visual_events)
+            CompanionReply(
+                generation,
+                spoken_text,
+                point_target,
+                speech_audio,
+                speech_error,
+                visual_events,
+                transcript=transcript,
+                remembered_text=extract_scene_blocks(reply_text)[0],
+                remember=stop_reason != "refusal",
+            )
         )
 
     async def _run_typed_interaction(
@@ -452,10 +531,16 @@ class CompanionController(QObject):
         if not self._is_current(reply.generation):
             return
         self.reply_text_changed.emit(reply.spoken_text)
-        self.visuals_ready.emit(VisualPlan(reply.spoken_text, reply.visual_events, reply.speech_audio is not None))
+        speak_text = getattr(self._player, "speak_text", None)
+        # No ElevenLabs audio but a voice error: the Windows voice says it instead (if the player has one).
+        use_windows_voice = reply.speech_audio is None and bool(reply.speech_error) and speak_text is not None
+        has_voice = reply.speech_audio is not None or use_windows_voice
+        self.visuals_ready.emit(VisualPlan(reply.spoken_text, reply.visual_events, has_voice))
         if reply.point_target is not None:
             self.point_requested.emit(reply.point_target)
-        if reply.speech_audio is None:
+        if not has_voice:
+            if reply.remember:  # shown as text in full, so it counts as heard
+                self.history.add(reply.transcript, reply.remembered_text)
             self._set_state(CompanionState.IDLE)
             # No voice, so show the answer itself (the cursor shows no reply text while Clicky talks).
             if reply.speech_error:
@@ -465,8 +550,14 @@ class CompanionController(QObject):
             elif reply.spoken_text:
                 self.notice.emit(reply.spoken_text)
             return
+        self._speaking_reply = (reply.transcript, reply.remembered_text) if reply.remember else None
+        self._heard_fraction = 0.0
         self._set_state(CompanionState.RESPONDING)
-        self._player.play(reply.speech_audio)
+        if use_windows_voice:
+            self._fallback_text = reply.spoken_text
+            speak_text(reply.spoken_text)
+        else:
+            self._player.play(reply.speech_audio)
 
     # ----- helpers -----
 
@@ -483,7 +574,20 @@ class CompanionController(QObject):
             except Exception:
                 logger.exception("Microphone failed to stop")
 
+    def _remember_heard(self, fraction: float) -> None:
+        """Save the reply being spoken, up to `fraction` of it; a cut-off reply ends with CUT_OFF_MARKER."""
+        speaking_reply, self._speaking_reply = self._speaking_reply, None
+        if speaking_reply is None:
+            return
+        transcript, remembered_text = speaking_reply
+        heard = heard_part(remembered_text, fraction)
+        if heard and fraction < 1.0:
+            heard = f"{heard} {CUT_OFF_MARKER}"
+        self.history.add(transcript, heard)
+
     def _abort_current_interaction(self) -> None:
+        # Before player.stop(): stopping reports "finished", which would otherwise save the whole reply as heard.
+        self._remember_heard(self._heard_fraction)
         # Before player.stop(): stopping reports "finished", which would otherwise flush every pending mark.
         self.interrupted.emit()
         self._stop_microphone()

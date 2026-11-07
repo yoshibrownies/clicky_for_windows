@@ -66,6 +66,9 @@ Clicky explains properly (several sentences, an intuition, an example) and shows
 - **Animations** play inside the card: a ball speeding up with its velocity arrow growing, a graph plotting itself,
   a list being sorted step by step. Clicky writes a fresh scene for each question in its own safe animation
   language (shapes, arrows, plots, formulas of time, keyframes); nothing it writes is ever run as code.
+- **Drawn illustrations that follow the explanation**: up to four little scenes per answer, one per step, each
+  building on the last, designed fresh for whatever you ask. Clicky sketches what the topic needs (plus a few stock
+  figures like a person or a clock), and drawings sketch themselves in, turn, fade and light up as it talks.
 - **Animated underlines and circles** mark the exact words or buttons on your real screen, and the buddy can fly
   over to point.
 - **Follow-up chips** ("Explain terminal speed", "Try a calculation") appear under the card when it finishes. Click
@@ -73,7 +76,7 @@ Clicky explains properly (several sentences, an intuition, an example) and shows
 - **Move the card** by dragging its title bar, close it with **x**, and scroll back through it with the mouse wheel.
   If Clicky marks something under the card, the card glides out of the way.
 - **A status pill** at the top of the screen shows Listening, Thinking or Speaking while it works.
-- **Clear it all** any time with **Esc** or **Clear screen** in the tray menu.
+- **Clear it all** any time with **Esc** or **Clear screen** in the tray menu. Esc also stops Clicky talking.
 
 The card and chips never take keyboard focus. Everything else is click-through, and all of it stays out of Clicky's
 own screenshots.

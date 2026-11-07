@@ -7,7 +7,7 @@ from PySide6.QtCore import QCoreApplication
 from clicky.async_runner import AsyncRunner
 from clicky.claude_client import ClaudeStreamError, StreamFinished, TextDelta
 from clicky.controller import CompanionController, CompanionState, resolve_point_target, visible_reply_text
-from clicky.prompts import REFUSAL_SPOKEN_REPLY
+from clicky.prompts import CUT_OFF_MARKER, REFUSAL_SPOKEN_REPLY
 from clicky.screens import ScreenCapture, ScreenGeometry
 
 
@@ -560,6 +560,7 @@ def test_history_keeps_the_words_not_the_scene_json(qt_app, runner):
     controller.handle_push_to_talk_pressed()
     controller.handle_push_to_talk_released()
     wait_until(lambda: player.played)
+    controller.handle_playback_finished()  # remembered once heard
     remembered = controller.history.as_messages()[-1]["content"]
     assert "watch it fall." in remembered
     assert "<scene" not in remembered and '"objects"' not in remembered
@@ -582,3 +583,295 @@ def test_an_answer_interrupted_before_it_was_spoken_is_not_remembered(qt_app, ru
     controller.handle_push_to_talk_cancelled()
     wait_until(lambda: runner.in_flight_count == 0)
     assert len(controller.history) == 0
+
+
+# ---------- Esc stops Clicky talking ----------
+
+
+class SlowSpeechServices(FakeServices):
+    async def fetch_speech(self, text):
+        await asyncio.sleep(0.3)
+        return await super().fetch_speech(text)
+
+
+def test_stop_speaking_cuts_off_the_voice(qt_app, runner):
+    services = FakeServices()
+    controller, player, _, _ = make_controller(runner, services)
+    interrupted = []
+    controller.interrupted.connect(lambda: interrupted.append(True))
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    stops_before, interruptions_before = player.stop_calls, len(interrupted)
+    assert controller.stop_speaking() is True
+    assert player.stop_calls == stops_before + 1
+    assert controller.state is CompanionState.IDLE
+    assert len(interrupted) == interruptions_before + 1  # the lesson visuals stop with the voice
+
+
+def test_stop_speaking_while_thinking_drops_the_coming_answer(qt_app, runner):
+    services = SlowSpeechServices()
+    controller, player, _, _ = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.PROCESSING)
+    assert controller.stop_speaking() is True
+    assert controller.state is CompanionState.IDLE
+    time.sleep(0.5)
+    QCoreApplication.processEvents()
+    assert player.played == []
+    assert controller.state is CompanionState.IDLE
+
+
+def test_stop_speaking_leaves_listening_and_idle_alone(qt_app, runner):
+    services = FakeServices()
+    controller, player, microphones, _ = make_controller(runner, services)
+    assert controller.stop_speaking() is False
+    controller.handle_push_to_talk_pressed()
+    assert controller.stop_speaking() is False
+    assert controller.state is CompanionState.LISTENING
+    assert microphones[0].running
+
+
+# ---------- remembering only what was heard ----------
+
+LONG_REPLY = (
+    "the hippocampus links a memory together. [NOTE:hippocampus = index] ",
+    "later it moves into the cortex. [NOTE:cortex = long term] [FOLLOWUP:What is LTP?]",
+)
+
+
+def start_long_reply(runner):
+    services = FakeServices(reply_chunks=LONG_REPLY)
+    controller, player, microphones, recorded = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    return services, controller, player
+
+
+def test_nothing_is_remembered_until_the_answer_has_been_heard(qt_app, runner):
+    _, controller, _ = start_long_reply(runner)
+    assert len(controller.history) == 0
+    controller.handle_playback_progress(0.5)
+    controller.handle_playback_finished()
+    remembered = controller.history.as_messages()[-1]["content"]
+    assert "cortex = long term" in remembered
+    assert CUT_OFF_MARKER not in remembered
+
+
+def test_cutting_in_remembers_only_what_was_heard(qt_app, runner):
+    services, controller, _ = start_long_reply(runner)
+    controller.handle_playback_progress(0.6)
+    controller.handle_push_to_talk_pressed()  # "wait, what's an index?"
+    messages = controller.history.as_messages()
+    assert messages[0] == {"role": "user", "content": "where's the save button"}
+    remembered = messages[1]["content"]
+    assert remembered.startswith("the hippocampus links a memory together.")
+    assert remembered.endswith(CUT_OFF_MARKER)
+    assert "cortex" not in remembered and "FOLLOWUP" not in remembered
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: len(services.request_bodies) == 2)
+    assert services.request_bodies[1]["messages"][1]["content"] == remembered
+
+
+def test_escape_remembers_only_what_was_heard(qt_app, runner):
+    _, controller, _ = start_long_reply(runner)
+    controller.handle_playback_progress(0.4)
+    controller.stop_speaking()
+    remembered = controller.history.as_messages()[-1]["content"]
+    assert remembered.endswith(CUT_OFF_MARKER)
+    assert "cortex" not in remembered
+    assert len(controller.history) == 1
+
+
+def test_cut_off_before_any_speech_was_heard_is_forgotten(qt_app, runner):
+    _, controller, _ = start_long_reply(runner)
+    controller.stop_speaking()
+    assert len(controller.history) == 0
+
+
+def test_a_cut_off_answer_is_not_saved_again_when_the_player_reports_finished(qt_app, runner):
+    _, controller, player = start_long_reply(runner)
+    controller.handle_playback_progress(0.4)
+    controller.stop_speaking()
+    controller.handle_playback_finished()  # the real player emits finished on stop()
+    assert len(controller.history) == 1
+
+
+def test_forget_during_speech_also_forgets_the_answer_being_spoken(qt_app, runner):
+    _, controller, _ = start_long_reply(runner)
+    controller.history.add("older question", "older answer")
+    controller.handle_playback_progress(0.6)
+    controller.forget()  # tray "Forget" while Clicky is mid-answer
+    controller.handle_playback_finished()
+    assert len(controller.history) == 0
+
+
+# ---------- the voice starts while the drawings are still being written ----------
+
+
+class SceneStreamingServices(FakeServices):
+    """Speech comes first, then scene blocks; the stream waits (up to 2 s) for the voice to be requested."""
+
+    def __init__(self, **kwargs) -> None:
+        scene = (
+            '{"duration": 3, "world": {"x": [0, 1], "y": [0, 1]}, "objects": [{"type": "circle", "x": 0.5, "y": 0.5}]}'
+        )
+        super().__init__(
+            reply_chunks=("watch this. [ANIMATE:a] it grows. ", '<scene name="a">', scene, "</scene>"), **kwargs
+        )
+        self.order: list[str] = []
+
+    async def stream_reply(self, request_body):
+        self.request_bodies.append(request_body)
+        for chunk in self.reply_chunks:
+            yield TextDelta(chunk)
+            if chunk.startswith("<scene"):
+                for _ in range(200):
+                    if self.spoken:
+                        break
+                    await asyncio.sleep(0.01)
+        self.order.append("stream finished")
+        yield StreamFinished(self.stop_reason)
+
+    async def fetch_speech(self, text):
+        self.order.append("speech requested")
+        return await super().fetch_speech(text)
+
+
+def test_the_voice_is_fetched_while_scene_blocks_are_still_streaming(qt_app, runner):
+    services = SceneStreamingServices()
+    controller, player, _, _ = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    assert services.order == ["speech requested", "stream finished"]
+    assert services.spoken == ["watch this. it grows."]  # fetched once, with the final words
+    assert player.played == [b"mp3"]
+
+
+def test_words_after_a_scene_block_get_the_voice_refetched(qt_app, runner):
+    scene = '<scene name="a">{"duration": 3, "objects": [{"type": "circle", "x": 1, "y": 1}]}</scene>'
+    services = FakeServices(reply_chunks=("first part. [ANIMATE:a] ", scene, " and a late sentence."))
+    controller, player, _, _ = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    assert services.spoken[-1] == "first part. and a late sentence."
+    assert player.played == [b"mp3"]
+
+
+# ---------- Windows voice fallback ----------
+
+
+class SpeakingPlayer(FakePlayer):
+    """A player that can also speak text with the Windows voice (like VoiceOutput)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.spoken_texts: list[str] = []
+
+    def speak_text(self, text: str) -> None:
+        self.spoken_texts.append(text)
+
+
+class CountingVoiceServices(FakeServices):
+    def __init__(self, error_message: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.error_message = error_message
+
+    async def fetch_speech(self, text):
+        self.spoken.append(text)
+        raise RuntimeError(self.error_message)
+
+
+QUOTA_ERROR = (
+    'Text-to-speech failed (401): {"detail":{"code":"quota_exceeded","message":"This request exceeds your quota"}}'
+)
+
+
+def controller_with_speaking_player(runner, services):
+    player = SpeakingPlayer()
+    controller = CompanionController(
+        runner=runner,
+        services=services,
+        microphone_factory=FakeMicrophone,
+        capture_screens=lambda: [PRIMARY],
+        player=player,
+        model="m",
+        effort="low",
+    )
+    notices: list[str] = []
+    controller.notice.connect(notices.append)
+    return controller, player, notices
+
+
+def ask(controller):
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+
+
+def test_a_failed_voice_falls_back_to_speaking_the_text(qt_app, runner):
+    services = CountingVoiceServices(QUOTA_ERROR)
+    controller, player, notices = controller_with_speaking_player(runner, services)
+    ask(controller)
+    wait_until(lambda: player.spoken_texts)
+    assert player.spoken_texts == ["click save."]
+    assert controller.state is CompanionState.RESPONDING and notices == []
+    controller.handle_playback_finished()
+    assert controller.history.as_messages()[-1]["content"].startswith("click save.")
+
+
+def test_after_a_quota_error_elevenlabs_is_not_asked_again(qt_app, runner):
+    services = CountingVoiceServices(QUOTA_ERROR)
+    controller, player, _ = controller_with_speaking_player(runner, services)
+    ask(controller)
+    wait_until(lambda: len(player.spoken_texts) == 1)
+    controller.handle_playback_finished()
+    ask(controller)
+    wait_until(lambda: len(player.spoken_texts) == 2)
+    assert len(services.spoken) == 1  # the second answer went straight to the Windows voice
+
+
+def test_other_voice_errors_still_retry_elevenlabs(qt_app, runner):
+    services = CountingVoiceServices("Couldn't reach the Clicky Worker: timed out")
+    controller, player, _ = controller_with_speaking_player(runner, services)
+    for expected in (1, 2):
+        ask(controller)
+        wait_until(lambda expected=expected: len(player.spoken_texts) == expected)
+        controller.handle_playback_finished()
+    assert len(services.spoken) == 2
+
+
+def test_if_the_windows_voice_fails_too_the_answer_is_shown(qt_app, runner):
+    services = CountingVoiceServices(QUOTA_ERROR)
+    controller, player, notices = controller_with_speaking_player(runner, services)
+    ask(controller)
+    wait_until(lambda: player.spoken_texts)
+    controller.handle_voice_failed("no windows voice is available")
+    assert controller.state is CompanionState.IDLE
+    assert notices and "click save." in notices[-1]
+
+
+def test_cutting_off_the_windows_voice_remembers_only_what_was_heard(qt_app, runner):
+    services = CountingVoiceServices(QUOTA_ERROR, reply_chunks=LONG_REPLY)
+    controller, player, _ = controller_with_speaking_player(runner, services)
+    ask(controller)
+    wait_until(lambda: player.spoken_texts)
+    controller.handle_playback_progress(0.4)
+    controller.stop_speaking()  # Esc
+    remembered = controller.history.as_messages()[-1]["content"]
+    assert remembered.endswith(CUT_OFF_MARKER) and "cortex" not in remembered
+
+
+def test_a_quota_error_from_the_early_voice_request_also_stops_elevenlabs(qt_app, runner):
+    scene = '<scene name="a">{"duration": 3, "objects": [{"type": "circle", "x": 1, "y": 1}]}</scene>'
+    services = CountingVoiceServices(QUOTA_ERROR, reply_chunks=("first part. [ANIMATE:a] ", scene))
+    controller, player, _ = controller_with_speaking_player(runner, services)
+    ask(controller)
+    wait_until(lambda: len(player.spoken_texts) == 1)
+    controller.handle_playback_finished()
+    ask(controller)
+    wait_until(lambda: len(player.spoken_texts) == 2)
+    assert len(services.spoken) == 1

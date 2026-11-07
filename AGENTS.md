@@ -26,7 +26,8 @@ Python 3.13 + PySide6 port of farzaa/clicky. Read `docs/design.md` before changi
 - Animations: the model writes `[ANIMATE:name]` plus a `<scene name="name">{json}</scene>` block (`visuals.py`).
   Formulas go ONLY through `expressions.compile_formula` (whitelisted recursive-descent parser) — never `eval`/`exec`.
   Every scene example in `prompts.py` must parse (tested). Design: `docs/superpowers/specs/2026-11-06-animations-and-clear-design.md`.
-- Clearing: Esc (`KeyTapWatcher`) and tray "Clear screen" call `build_clear_controls` in `app.py`; speech keeps playing.
+- Clearing: Esc (`KeyTapWatcher`) and tray "Clear screen" call `build_clear_controls` in `app.py`. Esc also stops speech (and an answer still on its way) via
+  `CompanionController.stop_speaking`; the tray item leaves speech playing. Esc never cancels listening.
 - Lesson card (`lesson_card.py`) replaced the notepad and whiteboard. Follow-up chips (`followup_chips.py`) and the card
   (drag by title bar, x to close, wheel to scroll) are the only clickable windows; they must never take keyboard focus.
   The card glides away from screen marks (`LessonCard.avoid`). Design: `docs/superpowers/specs/2026-11-06-movable-card-design.md`. Typed questions go through `CompanionController.ask_typed`.

@@ -33,3 +33,22 @@ def test_uncaught_exceptions_reach_the_log(caplog):
         assert "boom in a thread" in messages
     finally:
         sys.excepthook, threading.excepthook = previous_hooks
+
+
+def test_escape_stops_speech_and_clears_the_screen():
+    from clicky.app import build_escape_handler
+
+    calls = []
+
+    class FakeController:
+        def stop_speaking(self) -> bool:
+            calls.append("stop")
+            return True
+
+    visible = {"value": False}
+    handle_escape = build_escape_handler(FakeController(), lambda: calls.append("clear"), lambda: visible["value"])
+    handle_escape()
+    assert calls == ["stop"]  # nothing on screen, but the voice still stops
+    visible["value"] = True
+    handle_escape()
+    assert calls == ["stop", "stop", "clear"]

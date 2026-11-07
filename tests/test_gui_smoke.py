@@ -258,3 +258,24 @@ def test_explicit_point_wins_over_guiding(qt_app):
         assert overlay._mode in ("flying", "holding")
     finally:
         overlay.close()
+
+
+def test_speech_player_uses_the_current_default_output_each_time(qt_app, monkeypatch):
+    from clicky import playback
+    from clicky.playback import SpeechPlayer
+
+    player = SpeechPlayer()
+    chosen_devices = []
+
+    class RecordingOutput:
+        def setDevice(self, device) -> None:
+            chosen_devices.append(device)
+
+    player._audio_output = RecordingOutput()
+    current_default = {"device": "speakers"}
+    monkeypatch.setattr(playback, "default_audio_output", lambda: current_default["device"])
+    player.play(b"not really an mp3")
+    current_default["device"] = "headphones"  # you plugged headphones in between answers
+    player.play(b"not really an mp3")
+    player.stop()
+    assert chosen_devices == ["speakers", "headphones"]

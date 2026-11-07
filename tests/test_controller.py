@@ -582,3 +582,51 @@ def test_an_answer_interrupted_before_it_was_spoken_is_not_remembered(qt_app, ru
     controller.handle_push_to_talk_cancelled()
     wait_until(lambda: runner.in_flight_count == 0)
     assert len(controller.history) == 0
+
+
+# ---------- Esc stops Clicky talking ----------
+
+
+class SlowSpeechServices(FakeServices):
+    async def fetch_speech(self, text):
+        await asyncio.sleep(0.3)
+        return await super().fetch_speech(text)
+
+
+def test_stop_speaking_cuts_off_the_voice(qt_app, runner):
+    services = FakeServices()
+    controller, player, _, _ = make_controller(runner, services)
+    interrupted = []
+    controller.interrupted.connect(lambda: interrupted.append(True))
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    stops_before, interruptions_before = player.stop_calls, len(interrupted)
+    assert controller.stop_speaking() is True
+    assert player.stop_calls == stops_before + 1
+    assert controller.state is CompanionState.IDLE
+    assert len(interrupted) == interruptions_before + 1  # the lesson visuals stop with the voice
+
+
+def test_stop_speaking_while_thinking_drops_the_coming_answer(qt_app, runner):
+    services = SlowSpeechServices()
+    controller, player, _, _ = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.PROCESSING)
+    assert controller.stop_speaking() is True
+    assert controller.state is CompanionState.IDLE
+    time.sleep(0.5)
+    QCoreApplication.processEvents()
+    assert player.played == []
+    assert controller.state is CompanionState.IDLE
+
+
+def test_stop_speaking_leaves_listening_and_idle_alone(qt_app, runner):
+    services = FakeServices()
+    controller, player, microphones, _ = make_controller(runner, services)
+    assert controller.stop_speaking() is False
+    controller.handle_push_to_talk_pressed()
+    assert controller.stop_speaking() is False
+    assert controller.state is CompanionState.LISTENING
+    assert microphones[0].running

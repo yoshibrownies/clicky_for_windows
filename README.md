@@ -73,7 +73,7 @@ Clicky explains properly (several sentences, an intuition, an example) and shows
 - **Move the card** by dragging its title bar, close it with **x**, and scroll back through it with the mouse wheel.
   If Clicky marks something under the card, the card glides out of the way.
 - **A status pill** at the top of the screen shows Listening, Thinking or Speaking while it works.
-- **Clear it all** any time with **Esc** or **Clear screen** in the tray menu.
+- **Clear it all** any time with **Esc** or **Clear screen** in the tray menu. Esc also stops Clicky talking.
 
 The card and chips never take keyboard focus. Everything else is click-through, and all of it stays out of Clicky's
 own screenshots.

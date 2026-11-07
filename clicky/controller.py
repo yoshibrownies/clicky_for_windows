@@ -316,6 +316,16 @@ class CompanionController(QObject):
             self._abort_current_interaction()
             self._set_state(CompanionState.IDLE)
 
+    def stop_speaking(self) -> bool:
+        """Esc: cut off the voice, or drop an answer that is still being prepared. Returns whether anything stopped.
+
+        Leaves listening alone, so Esc never cancels a question you are still asking."""
+        if self.state not in (CompanionState.PROCESSING, CompanionState.RESPONDING):
+            return False
+        self._abort_current_interaction()
+        self._set_state(CompanionState.IDLE)
+        return True
+
     @Slot()
     def handle_playback_finished(self) -> None:
         if self.state is CompanionState.RESPONDING:

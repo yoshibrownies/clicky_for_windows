@@ -92,7 +92,7 @@ Replaying the same scene isn't needed.
 - Tray "Clear screen" item.
 - `clear_all()`: director.cancel, annotation layer clear, notepad clear, whiteboard clear, buddy bubble dismissed,
   and the buddy returns to the cursor. Speech keeps playing *(call: clearing visuals shouldn't silence an answer the
-  user is listening to; talking over Clicky already stops speech)*.
+  user is listening to; talking over Clicky already stops speech)*. *Changed 2026-11-07 at Yoshi's request: Esc now also stops speech; the tray item still doesn't.*
 
 ### Prompt
 A new tool line plus two full examples (kinematics with formulas, sorting with keyframes). When to animate: motion,

@@ -30,6 +30,7 @@ from clicky.scene import parse_scene
 from clicky.screens import capture_all_screens
 from clicky.services import WorkerServices
 from clicky.status_pill import StatusPill
+from clicky.system_voice import SystemVoice, VoiceOutput
 from clicky.tray import ClickyTray
 from clicky.visual_director import VisualDirector
 
@@ -190,7 +191,8 @@ def main() -> int:
 
     runner = AsyncRunner()
     services = WorkerServices(settings)
-    player = SpeechPlayer()
+    # ElevenLabs MP3s, with Windows' own voice as the fallback when they can't be fetched (e.g. credits used up).
+    player = VoiceOutput(SpeechPlayer(), SystemVoice())
     overlay = BuddyOverlay()
     controller = CompanionController(
         runner=runner,
@@ -282,6 +284,7 @@ def main() -> int:
 
     controller.point_requested.connect(point_at)
     player.finished.connect(controller.handle_playback_finished)
+    player.failed.connect(controller.handle_voice_failed)
     player.progress.connect(controller.handle_playback_progress)  # where you'd got to, if you cut it off
 
     # Underlines, circles and the lesson card, timed to the speech.

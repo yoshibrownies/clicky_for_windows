@@ -30,6 +30,9 @@ Python 3.13 + PySide6 port of farzaa/clicky. Read `docs/design.md` before changi
   (`icons.py` library); up to `MAX_ANIMATIONS` (4) scenes per reply, one per step of the explanation. Prompt icon names must
   match `icons.ICON_NAMES` (tested). Stay general: no topic-specific icons or worked examples (Yoshi: "do not overfit");
   subject-specific drawings come from the model's own `path` sketches. Design: `docs/superpowers/specs/2026-11-07-illustrated-explanations-design.md`.
+- Voice: `VoiceOutput` (`system_voice.py`) plays ElevenLabs MP3s and falls back to Windows' own voice (Qt
+  `QTextToSpeech`, word progress) when the voice can't be fetched; after `quota_exceeded` ElevenLabs isn't asked again
+  until restart. Tests use the silent `mock` engine. Design: `docs/superpowers/specs/2026-11-07-system-voice-fallback-design.md`.
 - History holds only what you heard: a reply is added when speech ends, or cut at playback progress
   (`visuals.heard_part`) plus `prompts.CUT_OFF_MARKER` when interrupted.
   Design: `docs/superpowers/specs/2026-11-07-interrupt-awareness-design.md`.

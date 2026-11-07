@@ -282,6 +282,7 @@ def main() -> int:
 
     controller.point_requested.connect(point_at)
     player.finished.connect(controller.handle_playback_finished)
+    player.progress.connect(controller.handle_playback_progress)  # where you'd got to, if you cut it off
 
     # Underlines, circles and the lesson card, timed to the speech.
     controller.visuals_ready.connect(visual_director.start)

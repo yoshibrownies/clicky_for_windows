@@ -27,9 +27,9 @@ from clicky.config import is_openai_model
 from clicky.conversation import ConversationHistory
 from clicky.openai_client import build_openai_chat_request_body
 from clicky.pointing import parse_point_tag
-from clicky.prompts import COMPANION_SYSTEM_PROMPT, REFUSAL_SPOKEN_REPLY
+from clicky.prompts import COMPANION_SYSTEM_PROMPT, CUT_OFF_MARKER, REFUSAL_SPOKEN_REPLY
 from clicky.screens import ScreenCapture, map_image_point_to_screen
-from clicky.visuals import extract_scene_blocks, parse_visual_reply, visible_text
+from clicky.visuals import extract_scene_blocks, heard_part, parse_visual_reply, visible_text
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,9 @@ class CompanionReply:
     speech_audio: bytes | None
     speech_error: str | None
     visual_events: tuple[ScreenVisualEvent, ...] = ()
+    transcript: str = ""
+    remembered_text: str = ""  # the reply for the history: tags kept, scene JSON left out
+    remember: bool = False
 
 
 @dataclass(frozen=True)
@@ -234,6 +237,9 @@ class CompanionController(QObject):
         self._microphone: Microphone | None = None
         self._audio_queue: asyncio.Queue | None = None
         self._interaction_future: concurrent.futures.Future | None = None
+        # The reply being spoken, remembered only once heard: in full, or up to where you cut it off.
+        self._speaking_reply: tuple[str, str] | None = None  # (transcript, remembered_text)
+        self._heard_fraction = 0.0
 
         self._reply_ready.connect(self._on_reply_ready)
         self._interaction_failed.connect(self._on_interaction_failed)
@@ -326,9 +332,14 @@ class CompanionController(QObject):
         self._set_state(CompanionState.IDLE)
         return True
 
+    @Slot(float)
+    def handle_playback_progress(self, fraction: float) -> None:
+        self._heard_fraction = max(self._heard_fraction, fraction)
+
     @Slot()
     def handle_playback_finished(self) -> None:
         if self.state is CompanionState.RESPONDING:
+            self._remember_heard(1.0)
             self._set_state(CompanionState.IDLE)
 
     def set_model(self, model: str) -> None:
@@ -407,13 +418,20 @@ class CompanionController(QObject):
         except Exception as tts_error:
             logger.warning("Text-to-speech failed: %s", tts_error)
             speech_error = str(tts_error)
-        # Remembered only now: an answer cut off before it was spoken never happened as far as you know. The scene
-        # JSON is left out (it's big, and the [ANIMATE:name] tag already says an animation was shown).
-        if stop_reason != "refusal":
-            self.history.add(transcript, extract_scene_blocks(reply_text)[0])
-
+        # Remembered on the GUI thread once heard (see _remember_heard). The scene JSON is left out (it's big, and
+        # the [ANIMATE:name] tag already says an animation was shown).
         self._reply_ready.emit(
-            CompanionReply(generation, spoken_text, point_target, speech_audio, speech_error, visual_events)
+            CompanionReply(
+                generation,
+                spoken_text,
+                point_target,
+                speech_audio,
+                speech_error,
+                visual_events,
+                transcript=transcript,
+                remembered_text=extract_scene_blocks(reply_text)[0],
+                remember=stop_reason != "refusal",
+            )
         )
 
     async def _run_typed_interaction(
@@ -466,6 +484,8 @@ class CompanionController(QObject):
         if reply.point_target is not None:
             self.point_requested.emit(reply.point_target)
         if reply.speech_audio is None:
+            if reply.remember:  # shown as text in full, so it counts as heard
+                self.history.add(reply.transcript, reply.remembered_text)
             self._set_state(CompanionState.IDLE)
             # No voice, so show the answer itself (the cursor shows no reply text while Clicky talks).
             if reply.speech_error:
@@ -475,6 +495,8 @@ class CompanionController(QObject):
             elif reply.spoken_text:
                 self.notice.emit(reply.spoken_text)
             return
+        self._speaking_reply = (reply.transcript, reply.remembered_text) if reply.remember else None
+        self._heard_fraction = 0.0
         self._set_state(CompanionState.RESPONDING)
         self._player.play(reply.speech_audio)
 
@@ -493,7 +515,20 @@ class CompanionController(QObject):
             except Exception:
                 logger.exception("Microphone failed to stop")
 
+    def _remember_heard(self, fraction: float) -> None:
+        """Save the reply being spoken, up to `fraction` of it; a cut-off reply ends with CUT_OFF_MARKER."""
+        speaking_reply, self._speaking_reply = self._speaking_reply, None
+        if speaking_reply is None:
+            return
+        transcript, remembered_text = speaking_reply
+        heard = heard_part(remembered_text, fraction)
+        if heard and fraction < 1.0:
+            heard = f"{heard} {CUT_OFF_MARKER}"
+        self.history.add(transcript, heard)
+
     def _abort_current_interaction(self) -> None:
+        # Before player.stop(): stopping reports "finished", which would otherwise save the whole reply as heard.
+        self._remember_heard(self._heard_fraction)
         # Before player.stop(): stopping reports "finished", which would otherwise flush every pending mark.
         self.interrupted.emit()
         self._stop_microphone()

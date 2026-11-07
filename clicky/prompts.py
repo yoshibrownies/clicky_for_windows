@@ -55,3 +55,6 @@ examples:
 """
 
 REFUSAL_SPOKEN_REPLY = "sorry, i can't help with that one."
+
+# Ends a remembered reply that the user cut off; the prompt tells the model what it means.
+CUT_OFF_MARKER = "… (the user cut me off here)"

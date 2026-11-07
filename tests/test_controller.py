@@ -7,7 +7,7 @@ from PySide6.QtCore import QCoreApplication
 from clicky.async_runner import AsyncRunner
 from clicky.claude_client import ClaudeStreamError, StreamFinished, TextDelta
 from clicky.controller import CompanionController, CompanionState, resolve_point_target, visible_reply_text
-from clicky.prompts import REFUSAL_SPOKEN_REPLY
+from clicky.prompts import CUT_OFF_MARKER, REFUSAL_SPOKEN_REPLY
 from clicky.screens import ScreenCapture, ScreenGeometry
 
 
@@ -560,6 +560,7 @@ def test_history_keeps_the_words_not_the_scene_json(qt_app, runner):
     controller.handle_push_to_talk_pressed()
     controller.handle_push_to_talk_released()
     wait_until(lambda: player.played)
+    controller.handle_playback_finished()  # remembered once heard
     remembered = controller.history.as_messages()[-1]["content"]
     assert "watch it fall." in remembered
     assert "<scene" not in remembered and '"objects"' not in remembered
@@ -630,3 +631,69 @@ def test_stop_speaking_leaves_listening_and_idle_alone(qt_app, runner):
     assert controller.stop_speaking() is False
     assert controller.state is CompanionState.LISTENING
     assert microphones[0].running
+
+
+# ---------- remembering only what was heard ----------
+
+LONG_REPLY = (
+    "the hippocampus links a memory together. [NOTE:hippocampus = index] ",
+    "later it moves into the cortex. [NOTE:cortex = long term] [FOLLOWUP:What is LTP?]",
+)
+
+
+def start_long_reply(runner):
+    services = FakeServices(reply_chunks=LONG_REPLY)
+    controller, player, microphones, recorded = make_controller(runner, services)
+    controller.handle_push_to_talk_pressed()
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: controller.state is CompanionState.RESPONDING)
+    return services, controller, player
+
+
+def test_nothing_is_remembered_until_the_answer_has_been_heard(qt_app, runner):
+    _, controller, _ = start_long_reply(runner)
+    assert len(controller.history) == 0
+    controller.handle_playback_progress(0.5)
+    controller.handle_playback_finished()
+    remembered = controller.history.as_messages()[-1]["content"]
+    assert "cortex = long term" in remembered
+    assert CUT_OFF_MARKER not in remembered
+
+
+def test_cutting_in_remembers_only_what_was_heard(qt_app, runner):
+    services, controller, _ = start_long_reply(runner)
+    controller.handle_playback_progress(0.6)
+    controller.handle_push_to_talk_pressed()  # "wait, what's an index?"
+    messages = controller.history.as_messages()
+    assert messages[0] == {"role": "user", "content": "where's the save button"}
+    remembered = messages[1]["content"]
+    assert remembered.startswith("the hippocampus links a memory together.")
+    assert remembered.endswith(CUT_OFF_MARKER)
+    assert "cortex" not in remembered and "FOLLOWUP" not in remembered
+    controller.handle_push_to_talk_released()
+    wait_until(lambda: len(services.request_bodies) == 2)
+    assert services.request_bodies[1]["messages"][1]["content"] == remembered
+
+
+def test_escape_remembers_only_what_was_heard(qt_app, runner):
+    _, controller, _ = start_long_reply(runner)
+    controller.handle_playback_progress(0.4)
+    controller.stop_speaking()
+    remembered = controller.history.as_messages()[-1]["content"]
+    assert remembered.endswith(CUT_OFF_MARKER)
+    assert "cortex" not in remembered
+    assert len(controller.history) == 1
+
+
+def test_cut_off_before_any_speech_was_heard_is_forgotten(qt_app, runner):
+    _, controller, _ = start_long_reply(runner)
+    controller.stop_speaking()
+    assert len(controller.history) == 0
+
+
+def test_a_cut_off_answer_is_not_saved_again_when_the_player_reports_finished(qt_app, runner):
+    _, controller, player = start_long_reply(runner)
+    controller.handle_playback_progress(0.4)
+    controller.stop_speaking()
+    controller.handle_playback_finished()  # the real player emits finished on stop()
+    assert len(controller.history) == 1

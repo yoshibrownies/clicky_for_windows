@@ -85,3 +85,9 @@ def test_prompt_teaches_live_highlights_and_that_the_card_is_invisible():
     assert highlighted == ["moon", "gravity"]
     scenes = extract_scene_blocks(reply)[1]
     assert "orbit" in scenes and all(f'"label": "{name}"' in scenes["orbit"] for name in highlighted)
+
+
+def test_prompt_explains_the_cut_off_marker():
+    from clicky.prompts import COMPANION_SYSTEM_PROMPT, CUT_OFF_MARKER
+
+    assert CUT_OFF_MARKER in COMPANION_SYSTEM_PROMPT

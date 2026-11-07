@@ -116,3 +116,11 @@ def test_the_figure_library_stays_general_purpose():
     # Subject-specific figures belong in the model's own path drawings, not the library (no overfitting to a topic).
     assert len(ICON_NAMES) <= 10
     assert not {"brain", "neuron", "synapse", "domino"} & set(ICON_NAMES)
+
+
+def test_prompt_warns_that_paths_are_y_up_and_keeps_scene_counts_lean():
+    lowered = COMPANION_SYSTEM_PROMPT.lower()
+    assert "y points up, unlike svg" in lowered  # otherwise remembered svg shapes draw upside down
+    assert "no a, s or t" in lowered  # unsupported commands would silently drop the drawing
+    assert "only as many as the ideas need" in lowered
+    assert "2 to 4 in all" not in lowered

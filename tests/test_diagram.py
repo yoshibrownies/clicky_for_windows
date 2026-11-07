@@ -90,3 +90,61 @@ def test_cycles_keep_reading_order_and_mark_the_back_edge():
 
 def test_acyclic_diagram_has_no_back_edges():
     assert layout_diagram(parse_diagram("a -> b -> c"), 300, 150).back_edges == frozenset()
+
+
+# ---------- labels wrap and fit instead of being cut off ----------
+
+
+def fake_measure(text: str) -> float:
+    return 7.0 * len(text)
+
+
+def test_long_labels_wrap_instead_of_being_cut():
+    from clicky.diagram import LABEL_LINE_HEIGHT, LABEL_PADDING
+
+    label = "short term memory store"
+    diagram = parse_diagram(" -> ".join(f"{label} {index}" for index in range(5)))
+    layout = layout_diagram(diagram, 388, 174, measure=fake_measure)
+    for node, name in enumerate(diagram.nodes):
+        lines = layout.lines[node]
+        assert " ".join(lines) == name and "…" not in name
+        _, _, width, height = layout.boxes[node]
+        assert all(fake_measure(line) * layout.font_scale <= width - LABEL_PADDING + 1e-6 for line in lines)
+        assert height >= len(lines) * LABEL_LINE_HEIGHT * layout.font_scale
+
+
+def test_one_long_word_breaks_inside_the_word():
+    diagram = parse_diagram("electroencephalography -> b -> c -> d")
+    layout = layout_diagram(diagram, 388, 174, measure=fake_measure)
+    assert "".join(layout.lines[0]) == "electroencephalography"
+
+
+def test_short_labels_stay_one_line_at_full_size():
+    layout = layout_diagram(parse_diagram("start -> loop -> end"), 388, 174, measure=fake_measure)
+    assert layout.font_scale == 1.0
+    assert all(len(lines) == 1 for lines in layout.lines.values())
+
+
+def test_needed_height_grows_with_wrapped_boxes():
+    short = layout_diagram(parse_diagram("a -> b -> c -> d -> e"), 388, 174, measure=fake_measure)
+    long = layout_diagram(
+        parse_diagram("quite a long label a -> quite a long label b -> quite a long label c -> quite a long label d"),
+        388,
+        174,
+        measure=fake_measure,
+    )
+    assert long.needed_height > short.needed_height
+
+
+def test_eight_boxes_in_a_layer_fit():
+    children = "; ".join(f"root -> child number {index}xx" for index in range(7))
+    diagram = parse_diagram(children)
+    layout = layout_diagram(diagram, 388, 174, measure=fake_measure)
+    for node, name in enumerate(diagram.nodes):
+        assert "".join(layout.lines[node]).replace(" ", "") == name.replace(" ", "")
+    assert layout.needed_height > 0
+
+
+def test_without_a_measure_layout_is_one_line_per_box():
+    layout = layout_diagram(parse_diagram("a -> b"), 388, 174)
+    assert layout.lines == {0: ("a",), 1: ("b",)} and layout.font_scale == 1.0

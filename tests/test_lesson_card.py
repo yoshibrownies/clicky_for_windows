@@ -233,3 +233,20 @@ def test_highlight_rings_the_newest_animation_that_has_that_object(qt_app):
         assert card._highlight[2].scene.objects[0].label == "you"
     finally:
         card.close()
+
+
+def test_a_diagram_with_long_labels_gets_a_taller_block_and_keeps_every_word(qt_app):
+    card = make_card()
+    try:
+        card.start_reply()
+        card.set_diagram(
+            "sensory input arrives -> attention filters it -> working memory holds it -> sleep consolidates it"
+        )
+        block = card._blocks[-1]
+        assert 190 < block.height <= 340
+        layout = block.diagram_layout
+        assert layout is not None
+        for node, label in enumerate(block.diagram.nodes):
+            assert " ".join(layout.lines[node]) == label  # wrapped, never cut
+    finally:
+        card.close()

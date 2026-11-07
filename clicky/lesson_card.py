@@ -30,7 +30,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 from clicky.animation import ease_in_out
-from clicky.diagram import Diagram, layout_diagram, parse_diagram
+from clicky.diagram import LABEL_LINE_HEIGHT, Diagram, DiagramLayout, layout_diagram, parse_diagram
 from clicky.followup_chips import chips_reserve
 from clicky.fonts import mono_font, ui_font
 from clicky.handwriting import typed_characters, wrap_text
@@ -52,6 +52,7 @@ BLOCK_GAP = 10
 NOTE_INDENT = 18
 EMPTY_CONTENT_HEIGHT = 60
 DIAGRAM_BLOCK_HEIGHT = 190
+MAX_DIAGRAM_BLOCK_HEIGHT = 340  # a diagram with wrapped labels grows up to this
 ANIMATION_BLOCK_HEIGHT = 250
 BLOCK_FADE_SECONDS = 0.25
 ANIMATION_REVEAL_SECONDS = 0.6
@@ -96,6 +97,7 @@ class _Block:
     height: float
     lines: list[str]
     diagram: Diagram | None = None
+    diagram_layout: DiagramLayout | None = None  # worked out once, with labels wrapped to fit
     scene: Scene | None = None
 
     def progress(self, now: float) -> float:
@@ -229,7 +231,17 @@ class LessonCard(QWidget):
         if not diagram.nodes:
             return
         reveal = len(diagram.nodes) * NODE_APPEAR_SECONDS + len(diagram.edges) * EDGE_DRAW_SECONDS
-        self._append(_Block("diagram", spec, self._next_start(), reveal, DIAGRAM_BLOCK_HEIGHT, [], diagram=diagram))
+        # Labels wrap (and only then shrink) to stay whole; the block grows to hold the taller boxes.
+        layout = layout_diagram(
+            diagram,
+            self._diagram_area(0.0).width(),
+            DIAGRAM_BLOCK_HEIGHT - 16,
+            measure=QFontMetricsF(self._label_font).horizontalAdvance,
+            max_height=MAX_DIAGRAM_BLOCK_HEIGHT - 16,
+        )
+        height = max(DIAGRAM_BLOCK_HEIGHT, min(MAX_DIAGRAM_BLOCK_HEIGHT, layout.needed_height + 16))
+        block = _Block("diagram", spec, self._next_start(), reveal, height, [], diagram=diagram, diagram_layout=layout)
+        self._append(block)
 
     def play_animation(self, scene: Scene | None) -> None:
         if not self._accepting or scene is None:
@@ -560,8 +572,8 @@ class LessonCard(QWidget):
             if block.kind in TEXT_STYLES:
                 return self._text_pen(block, top, now)
             if block.kind == "diagram" and block.diagram is not None:
-                area = self._diagram_area(top)
-                layout = layout_diagram(block.diagram, area.width(), area.height())
+                area = self._diagram_area(top, block.height)
+                layout = block.diagram_layout or layout_diagram(block.diagram, area.width(), area.height())
                 shown = min(len(block.diagram.nodes) - 1, int((now - block.starts_at) / NODE_APPEAR_SECONDS))
                 x, y, width, height = layout.boxes[max(0, shown)]
                 return QPointF(area.left() + x + width / 2, area.top() + y + height)
@@ -583,11 +595,9 @@ class LessonCard(QWidget):
             remaining -= len(line) + 1
         return QPointF(self._text_left(block), top)
 
-    def _diagram_area(self, top: float) -> QRectF:
+    def _diagram_area(self, top: float, block_height: float = DIAGRAM_BLOCK_HEIGHT) -> QRectF:
         paper = self._paper_rect()
-        return QRectF(
-            paper.left() + PADDING_X - 8, top + 6, paper.width() - 2 * PADDING_X + 16, DIAGRAM_BLOCK_HEIGHT - 16
-        )
+        return QRectF(paper.left() + PADDING_X - 8, top + 6, paper.width() - 2 * PADDING_X + 16, block_height - 16)
 
     def _animation_area(self, top: float) -> QRectF:
         paper = self._paper_rect()
@@ -745,8 +755,8 @@ class LessonCard(QWidget):
     def _paint_diagram(self, painter: QPainter, block: _Block, top: float, now: float) -> None:
         diagram = block.diagram
         assert diagram is not None
-        area = self._diagram_area(top)
-        layout = layout_diagram(diagram, area.width(), area.height())
+        area = self._diagram_area(top, block.height)
+        layout = block.diagram_layout or layout_diagram(diagram, area.width(), area.height())
         elapsed = now - block.starts_at
         node_count = len(diagram.nodes)
         for edge_index, (source, target) in enumerate(diagram.edges):
@@ -780,8 +790,11 @@ class LessonCard(QWidget):
                 painter.drawPath(path)
                 if progress >= 1.0:
                     self._paint_arrowhead(painter, control, end)
-        painter.setFont(self._label_font)
-        label_metrics = QFontMetricsF(self._label_font)
+        label_font = self._label_font
+        if layout.font_scale < 1.0:
+            label_font = ui_font(max(11, round(13 * layout.font_scale)), QFont.Weight.Medium)
+        painter.setFont(label_font)
+        line_height = LABEL_LINE_HEIGHT * layout.font_scale
         for node_index, label in enumerate(diagram.nodes):
             appear = (elapsed - node_index * NODE_APPEAR_SECONDS) / NODE_APPEAR_SECONDS
             if appear <= 0:
@@ -803,11 +816,11 @@ class LessonCard(QWidget):
             painter.setBrush(NODE_FILL)
             painter.drawPath(path)
             painter.setPen(INK_COLOR)
-            painter.drawText(
-                box,
-                Qt.AlignmentFlag.AlignCenter,
-                label_metrics.elidedText(label, Qt.TextElideMode.ElideRight, box.width() - 8),
-            )
+            lines = layout.lines.get(node_index, (label,))
+            lines_top = box.center().y() - len(lines) * line_height / 2
+            for line_index, line in enumerate(lines):
+                line_rect = QRectF(box.left(), lines_top + line_index * line_height, box.width(), line_height)
+                painter.drawText(line_rect, Qt.AlignmentFlag.AlignCenter, line)
             painter.restore()
 
     @staticmethod

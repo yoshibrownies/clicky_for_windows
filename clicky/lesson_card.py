@@ -100,6 +100,7 @@ class _Block:
     diagram: Diagram | None = None
     diagram_layout: DiagramLayout | None = None  # worked out once, with labels wrapped to fit
     still: QPixmap | None = None  # a finished animation, drawn once and reused instead of repainting
+    still_key: tuple[float, float, float] | None = None  # (width, height, pixel ratio) the still was drawn for
     scene: Scene | None = None
 
     def progress(self, now: float) -> float:
@@ -869,7 +870,7 @@ class LessonCard(QWidget):
         appear = min(1.0, (now - block.starts_at) / BLOCK_FADE_SECONDS)
         scene_time = max(0.0, min(scene.duration, now - block.starts_at))
         highlight = None
-        if self._highlight is not None and self._highlight[2] is block:
+        if self._highlight is not None and self._highlight[2] is block and self._highlight_active(now):
             highlight = (self._highlight[0], now - self._highlight[1])
         finished = highlight is None and appear >= 1.0 and now - block.starts_at >= scene.duration
         if not finished:
@@ -879,8 +880,12 @@ class LessonCard(QWidget):
             self._paint_animation_contents(painter, area, scene, scene_time, highlight)
             painter.restore()
             return
-        if block.still is None or block.still.deviceIndependentSize() != area.size():
+        # Keyed on the logical size and the screen's pixel ratio: at 125% scaling the pixmap's own size is rounded,
+        # so comparing it to the area would never match, and a move to another monitor needs a sharper picture.
+        still_key = (area.width(), area.height(), self.devicePixelRatioF() or 1.0)
+        if block.still is None or block.still_key != still_key:
             block.still = self._render_still(scene, area)
+            block.still_key = still_key
         painter.drawPixmap(area.topLeft(), block.still)
 
     def _paint_animation_contents(

@@ -359,3 +359,43 @@ def test_the_still_picture_looks_like_the_live_drawing(qt_app):
         assert different / samples < 0.02
     finally:
         card.close()
+
+
+def test_the_still_picture_is_reused_at_fractional_scaling_and_redrawn_when_scaling_changes(qt_app):
+    card = make_card()
+    try:
+        card.start_reply()
+        card.play_animation(_dot_scene())
+        block = card._blocks[-1]
+        renders = []
+        original_render = card._render_still
+        card._render_still = lambda scene, area: renders.append(1) or original_render(scene, area)
+        ratio = {"value": 1.25}  # 125% display scaling, the usual Windows laptop setting
+        card.devicePixelRatioF = lambda: ratio["value"]
+        done = block.starts_at + 2.0
+        _paint_block(card, block, done)
+        _paint_block(card, block, done + 0.1)
+        assert len(renders) == 1
+        ratio["value"] = 2.0  # dragged onto a 200% monitor
+        _paint_block(card, block, done + 0.2)
+        assert len(renders) == 2
+    finally:
+        card.close()
+
+
+def test_an_animation_goes_back_to_its_still_picture_once_the_ring_has_faded(qt_app):
+    import time
+
+    card = make_card()
+    try:
+        card.start_reply()
+        card.play_animation(_dot_scene())
+        block = card._blocks[-1]
+        block.starts_at = time.monotonic() - 20.0
+        card._highlight = ("dot", time.monotonic() - 10.0, block)  # ringed long ago; the ring is gone
+        _paint_block(card, block, time.monotonic())
+        calls = _counting_frames(block.scene)
+        _paint_block(card, block, time.monotonic())
+        assert block.still is not None and calls == []
+    finally:
+        card.close()

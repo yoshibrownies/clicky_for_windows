@@ -197,6 +197,17 @@ class Scene:
                 current = (text, min(1.0, (t - start) / CAPTION_FADE_SECONDS))
         return current
 
+    def has_label(self, label: str) -> bool:
+        """Whether an object is called `label` (its label, or a text object's text at the start or end)."""
+        wanted = label.casefold().strip()
+        for scene_object in self.objects:
+            texts = [scene_object.label]
+            if scene_object.text is not None:
+                texts += [scene_object.text(0.0), scene_object.text(self.duration)]
+            if wanted in (text.casefold().strip() for text in texts):
+                return True
+        return False
+
     def frame(self, t: float) -> list[DrawItem]:
         items: list[DrawItem] = []
         for scene_object in self.objects:

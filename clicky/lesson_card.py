@@ -319,9 +319,12 @@ class LessonCard(QWidget):
         return self._highlight[0] if self._highlight is not None else None
 
     def highlight(self, label: str) -> None:
-        """Ring the object called `label` in the newest animation, following it as it moves, for a few seconds."""
+        """Ring the object called `label`, following it as it moves, for a few seconds. With several animations it
+        goes to the newest one that has that object (Clicky may point back at an earlier step), else the newest."""
         label = " ".join(label.split())
-        animation = next((block for block in reversed(self._blocks) if block.kind == "animation"), None)
+        animations = [block for block in reversed(self._blocks) if block.kind == "animation"]
+        animation = next((block for block in animations if block.scene and block.scene.has_label(label)), None)
+        animation = animation or (animations[0] if animations else None)
         if not self._accepting or not label or animation is None:
             return
         self._highlight = (label, max(time.monotonic(), animation.starts_at), animation)

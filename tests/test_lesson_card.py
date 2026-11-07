@@ -210,3 +210,26 @@ def test_height_cap_leaves_room_for_the_follow_up_chips(qt_app):
         assert 56 + card._height_cap() + 8 + chips_height <= available.height()
     finally:
         card.close()
+
+
+def test_highlight_rings_the_newest_animation_that_has_that_object(qt_app):
+    import json
+
+    from clicky.scene import parse_scene
+
+    def labelled_scene(label):
+        return parse_scene(json.dumps({"duration": 2, "objects": [{"type": "circle", "x": 1, "y": 1, "label": label}]}))
+
+    card = make_card()
+    try:
+        card.start_reply()
+        card.play_animation(labelled_scene("first cause"))
+        card.play_animation(labelled_scene("you"))
+        card.highlight("first cause")  # mentioned again while the later picture is up
+        assert card._highlight is not None and card._highlight[2].scene.objects[0].label == "first cause"
+        card.highlight("you")
+        assert card._highlight[2].scene.objects[0].label == "you"
+        card.highlight("nowhere")  # unknown labels still go to the newest picture (it may be a text object)
+        assert card._highlight[2].scene.objects[0].label == "you"
+    finally:
+        card.close()

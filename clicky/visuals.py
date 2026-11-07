@@ -15,7 +15,7 @@ MAX_MARKS = 6  # underlines + circles
 MAX_NOTES = 8
 MAX_DIAGRAMS = 1
 MAX_POINTS = 4
-MAX_ANIMATIONS = 1
+MAX_ANIMATIONS = 4
 # Lesson-card text blocks: (limit per reply, maximum characters)
 CARD_TEXT_TAGS = {"TITLE": (1, 40), "HEADING": (1, 60), "FORMULA": (3, 60), "FOLLOWUP": (3, 40), "HIGHLIGHT": (4, 40)}
 MAX_NOTE_LENGTH = 80

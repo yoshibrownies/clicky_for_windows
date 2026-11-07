@@ -131,13 +131,24 @@ def test_scene_block_can_come_before_the_marker_and_json_brackets_are_fine():
     assert reply.events[0].kind == "animate" and reply.events[0].text == scene
 
 
-def test_marker_without_a_block_and_extra_animations_are_dropped():
+def test_marker_without_a_block_is_dropped_and_several_animations_play_in_order():
     reply = parse_visual_reply(
         f'one [ANIMATE:a] two [ANIMATE:missing] three [ANIMATE:b] <scene name="a">{SCENE_JSON}</scene>'
         f'<scene name="b">{SCENE_JSON}</scene>'
     )
-    assert [event.kind for event in reply.events] == ["animate"]
+    assert [event.kind for event in reply.events] == ["animate", "animate"]
+    assert reply.events[0].fraction < reply.events[1].fraction
     assert reply.spoken_text == "one two three"
+
+
+def test_animations_beyond_the_limit_are_dropped():
+    from clicky.visuals import MAX_ANIMATIONS
+
+    markers = " ".join(f"step {index} [ANIMATE:s{index}]" for index in range(MAX_ANIMATIONS + 2))
+    blocks = "".join(f'<scene name="s{index}">{SCENE_JSON}</scene>' for index in range(MAX_ANIMATIONS + 2))
+    reply = parse_visual_reply(markers + blocks)
+    assert MAX_ANIMATIONS == 4
+    assert len([event for event in reply.events if event.kind == "animate"]) == MAX_ANIMATIONS
 
 
 def test_unfinished_scene_block_is_never_spoken():

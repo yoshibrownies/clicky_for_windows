@@ -273,7 +273,7 @@ def _parse_object(raw) -> SceneObject | None:
     if not isinstance(raw, dict):
         return None
     kind = raw.get("type")
-    if kind not in REQUIRED_NUMBERS:
+    if not isinstance(kind, str) or kind not in REQUIRED_NUMBERS:
         return None
     numbers: dict[str, NumberValue] = {}
     for name in REQUIRED_NUMBERS[kind]:

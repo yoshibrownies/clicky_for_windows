@@ -159,3 +159,30 @@ def test_a_rotated_rect_is_drawn_where_it_has_tipped_to(qt_app):
     assert max(red_columns(tipped_image)) - min(red_columns(tipped_image)) > 3 * (
         max(red_columns(upright_image)) - min(red_columns(upright_image))
     )
+
+
+def test_huge_paths_never_send_the_pen_off_into_space(qt_app):
+    from clicky.scene_painter import PIXEL_LIMIT
+
+    huge = parse_scene(
+        json.dumps(
+            {
+                "world": {"x": [0, 10], "y": [0, 10]},
+                "objects": [
+                    {
+                        "type": "path",
+                        "d": "M0 0 l1000000 1000000 l1000000 -1000000",
+                        "x": 1,
+                        "y": 1,
+                        "scale": 1e9,
+                        "draw": 0.5,
+                    }
+                ],
+            }
+        )
+    )
+    _, scene_painter = paint_to_image(huge, 0)
+    point = scene_painter.focus_point
+    assert point is not None
+    assert 0 <= point.x() <= 420 and 0 <= point.y() <= 260  # kept inside the animation panel
+    assert PIXEL_LIMIT == 10_000.0

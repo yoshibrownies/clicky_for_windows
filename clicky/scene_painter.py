@@ -110,7 +110,9 @@ def figure_pixel_points(item: DrawItem, mapper: WorldMapper) -> list[list[QPoint
         for local_x, local_y in segment:
             rotated_x = local_x * cos_a - local_y * sin_a
             rotated_y = local_x * sin_a + local_y * cos_a
-            outline.append(QPointF(anchor_x + rotated_x * pixel_scale, anchor_y - rotated_y * pixel_scale))
+            pixel_x = max(-PIXEL_LIMIT, min(PIXEL_LIMIT, anchor_x + rotated_x * pixel_scale))
+            pixel_y = max(-PIXEL_LIMIT, min(PIXEL_LIMIT, anchor_y - rotated_y * pixel_scale))
+            outline.append(QPointF(pixel_x, pixel_y))
         outlines.append(outline)
     return outlines
 
@@ -143,6 +145,12 @@ class ScenePainter:
         self.focus_point = None
         self.highlight_rect = None
         self._paint_scene(painter, area, scene, t, highlight)
+        if self.focus_point is not None:
+            # The buddy follows this point: keep it inside the panel, whatever the scene's numbers were.
+            self.focus_point = QPointF(
+                max(area.left(), min(area.right(), self.focus_point.x())),
+                max(area.top(), min(area.bottom(), self.focus_point.y())),
+            )
 
     def _plot_rect(self, board: QRectF, scene: Scene) -> QRectF:
         left_margin = 58 if scene.axes else 20

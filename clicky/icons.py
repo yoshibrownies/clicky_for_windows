@@ -85,11 +85,15 @@ _ICON_PIECES: dict[str, tuple[str, ...]] = {
 ICON_NAMES: tuple[str, ...] = tuple(_ICON_PIECES)
 
 
-@cache
 def icon_subpaths(name) -> Subpaths | None:
-    """The icon's outline in its unit box, or None for an unknown name."""
+    """The icon's outline in its unit box, or None for an unknown name (or anything that isn't a string)."""
     if not isinstance(name, str) or name not in _ICON_PIECES:
         return None
+    return _build_icon(name)
+
+
+@cache
+def _build_icon(name: str) -> Subpaths | None:
     subpaths: Subpaths = []
     for piece in _ICON_PIECES[name]:
         parsed = parse_path_data(piece)

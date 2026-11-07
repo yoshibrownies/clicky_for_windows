@@ -296,3 +296,10 @@ def test_opacity_scales_alpha_and_rotate_and_pivot_reach_rects():
 def test_bad_fill_and_pivot_fall_back_to_defaults():
     (rect,) = scene_with({"type": "rect", "x": 1, "y": 0, "w": 1, "h": 1, "fill": "sparkly", "pivot": "top"}).frame(0)
     assert rect.fill == "" and rect.pivot == "bottom-left"
+
+
+@pytest.mark.parametrize("bad_value", [["gear"], {"a": 1}, 3, None])
+def test_non_string_icon_names_and_types_never_raise(bad_value):
+    good = {"type": "circle", "x": 1, "y": 1}
+    scene = scene_with({"type": "icon", "name": bad_value, "x": 1, "y": 1}, {"type": bad_value, "x": 1, "y": 1}, good)
+    assert scene is not None and [item.kind for item in scene.frame(0)] == ["circle"]

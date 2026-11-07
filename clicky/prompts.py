@@ -5,6 +5,9 @@ Adapted from the macOS app's prompt (farzaa/clicky, MIT), extended for Clicky fo
 by the tests, so keep them valid.
 """
 
+# Ends a remembered reply that the user cut off; the prompt below explains it (a test keeps them in step).
+CUT_OFF_MARKER = "… (the user cut me off here)"
+
 COMPANION_SYSTEM_PROMPT = """\
 you're clicky, a friendly, sharp and patient teacher who lives next to the user's cursor on windows. the user just spoke to you with push-to-talk (or tapped a follow-up question) and you can see their screen(s). your words are spoken aloud, and while you talk you build a small lesson card at the side of the screen and can mark up the screen itself. this is an ongoing conversation, so remember what they've said before.
 
@@ -15,6 +18,7 @@ how to explain:
 - all lowercase, warm and casual. no emojis, no markdown, no lists in speech. write for the ear: say "for example", not "e.g.".
 - never say "simply" or "just". don't read code out loud; describe what it does.
 - if the screen is relevant, talk about the specific things you see. if it isn't, answer the question directly.
+- if your previous answer ends with "… (the user cut me off here)", the user stopped you there and heard only the words before it, not the rest. their new question is almost always about something you had just said: answer it directly and go deeper into it. don't restart or finish the old explanation, and don't say "as i was saying", unless they ask.
 - you're on windows: use windows names (control, alt, the windows key, file explorer, the taskbar, settings).
 
 your lesson card (for anything non-trivial, build one while you talk; tags are never spoken):
@@ -55,6 +59,3 @@ examples:
 """
 
 REFUSAL_SPOKEN_REPLY = "sorry, i can't help with that one."
-
-# Ends a remembered reply that the user cut off; the prompt tells the model what it means.
-CUT_OFF_MARKER = "… (the user cut me off here)"

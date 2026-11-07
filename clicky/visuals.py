@@ -224,6 +224,52 @@ def clean_spoken_text(text: str) -> str:
     return text.strip()
 
 
+def heard_part(reply_text: str, fraction: float) -> str:
+    """The reply up to where speech had reached (`fraction` of the spoken text), finishing the word being spoken.
+
+    Tags already reached stay, so the history says what was on screen; later tags and follow-ups (shown only once
+    speech ends) are dropped. Uses the same proportional mapping as the visual timeline. Scene blocks must already be
+    removed. Returns "" when no spoken word was reached."""
+    if fraction >= 1.0:
+        return reply_text.strip()
+    tags = find_tags(reply_text)
+    pieces: list[tuple[str, int, int]] = []  # ("text" | "tag", start, end) in reply_text
+    cursor = 0
+    for tag in tags:
+        pieces.append(("text", cursor, tag.start))
+        if tag.closed and tag.name != "FOLLOWUP":
+            pieces.append(("tag", tag.start, tag.end))
+        cursor = tag.end
+    pieces.append(("text", cursor, len(reply_text)))
+    total_length = len("".join(reply_text[start:end] for kind, start, end in pieces if kind == "text").rstrip())
+    cut = max(0.0, fraction) * total_length
+    if cut <= 0:
+        return ""
+
+    heard: list[str] = []
+    spoken_length = 0
+    heard_any_words = False
+    for kind, start, end in pieces:
+        if kind == "tag":
+            if spoken_length <= cut:
+                heard.append(reply_text[start:end])
+            continue
+        segment = reply_text[start:end]
+        if spoken_length + len(segment) <= cut:
+            heard.append(segment)
+            heard_any_words = heard_any_words or bool(segment.strip())
+            spoken_length += len(segment)
+            continue
+        speaking_index = int(cut - spoken_length)  # the character being spoken at the cut
+        heard_segment = segment[: speaking_index + 1]
+        if heard_segment and not heard_segment[-1].isspace():
+            heard_segment += re.match(r"\S*", segment[speaking_index + 1 :]).group(0)
+        heard.append(heard_segment)
+        heard_any_words = heard_any_words or bool(heard_segment.strip())
+        break
+    return "".join(heard).strip() if heard_any_words else ""
+
+
 def parse_visual_reply(response_text: str) -> VisualReply:
     response_text, scenes = extract_scene_blocks(response_text)
     spoken_parts: list[str] = []

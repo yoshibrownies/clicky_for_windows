@@ -1,8 +1,9 @@
 """Built-in general-purpose figures for illustrations (pure Python, no Qt). Kept small and topic-free on purpose:
 anything specific to a subject is drawn by the model with `path`, so illustrations fit whatever is asked.
 
-Each icon is drawn in a unit box: x from -0.5 to 0.5, y from 0 to 1 (y up), anchored at its bottom centre, so a scene
-places it with x, y and a size (its height in world units). Icons are made of several short path pieces.
+Each icon is sketched roughly in a unit box (y up) and normalised when built: its bottom centre is (0, 0) and its
+longer side is 1, so a scene places it exactly with x, y and a size (its longer side in world units). Icons are
+made of several short path pieces.
 """
 
 from __future__ import annotations
@@ -86,7 +87,7 @@ ICON_NAMES: tuple[str, ...] = tuple(_ICON_PIECES)
 
 
 def icon_subpaths(name) -> Subpaths | None:
-    """The icon's outline in its unit box, or None for an unknown name (or anything that isn't a string)."""
+    """The icon's normalised outline (bottom centre at 0, 0; longer side 1), or None for an unknown name."""
     if not isinstance(name, str) or name not in _ICON_PIECES:
         return None
     return _build_icon(name)
@@ -99,4 +100,12 @@ def _build_icon(name: str) -> Subpaths | None:
         parsed = parse_path_data(piece)
         if parsed:
             subpaths.extend(parsed)
-    return subpaths or None
+    if not subpaths:
+        return None
+    # Normalise to what the drawing really covers, so every figure stands exactly on its anchor (bottom centre)
+    # and its longer side is 1 — however much of its sketch box the artwork happens to use.
+    xs = [x for points in subpaths for x, _ in points]
+    ys = [y for points in subpaths for _, y in points]
+    longest = max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
+    centre_x, bottom = (min(xs) + max(xs)) / 2, min(ys)
+    return [[((x - centre_x) / longest, (y - bottom) / longest) for x, y in points] for points in subpaths]

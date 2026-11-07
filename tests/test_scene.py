@@ -228,3 +228,71 @@ def test_plot_and_trail_caps():
     assert sum(item.kind == "plot" for item in scene.objects) == MAX_PLOTS
     assert sum(item.trail for item in scene.objects) == MAX_TRAILS
     assert sum(item.kind == "circle" for item in scene.objects) == 10  # circles kept, only their trails capped
+
+
+# ---------- drawn illustrations: paths, icons, rotation, opacity, fill ----------
+
+
+def scene_with(*objects):
+    import json as _json
+
+    return parse_scene(_json.dumps({"duration": 4, "world": {"x": [0, 10], "y": [0, 10]}, "objects": list(objects)}))
+
+
+def test_path_objects_carry_their_outline_and_transform_values():
+    scene = scene_with(
+        {"type": "path", "d": "M 0 0 L 2 0 L 2 2 Z", "x": 3, "y": 4, "scale": 2, "rotate": 90, "fill": "orange"}
+    )
+    (item,) = scene.frame(1.0)
+    assert item.kind == "path"
+    assert item.segments == [[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 0.0)]]
+    assert (item.values["x"], item.values["y"], item.values["scale"], item.values["rotate"]) == (3, 4, 2, 90)
+    assert item.fill == "orange"
+
+
+def test_icons_use_the_built_in_library_and_unknown_ones_are_skipped():
+    scene = scene_with(
+        {"type": "icon", "name": "brain", "x": 5, "y": 1, "size": 4, "label": "brain"},
+        {"type": "icon", "name": "dragon", "x": 5, "y": 1},
+    )
+    (item,) = scene.frame(0.5)
+    assert item.kind == "icon" and item.label == "brain" and item.values["size"] == 4
+    assert len(item.segments) > 3
+    assert item.color == "black"
+
+
+def test_invalid_path_data_skips_the_object():
+    assert scene_with({"type": "path", "d": "L 1 1", "x": 0, "y": 0}) is None
+
+
+def test_draw_sketches_the_outline_in_over_time():
+    scene = scene_with({"type": "path", "d": "M 0 0 L 4 0", "x": 0, "y": 0, "draw": "min(1, t/2)"})
+    assert scene.frame(0.0) == [] or scene.frame(0.0)[0].segments == []
+    assert scene.frame(1.0)[0].segments == [[(0.0, 0.0), (2.0, 0.0)]]
+    assert scene.frame(3.0)[0].segments == [[(0.0, 0.0), (4.0, 0.0)]]
+
+
+def test_opacity_scales_alpha_and_rotate_and_pivot_reach_rects():
+    scene = scene_with(
+        {
+            "type": "rect",
+            "x": 1,
+            "y": 0,
+            "w": 1,
+            "h": 4,
+            "rotate": [[0, 0], [1, -80]],
+            "pivot": "bottom-right",
+            "opacity": 0.5,
+            "fill": "none",
+        },
+        {"type": "circle", "x": 1, "y": 1, "opacity": "t/4"},
+    )
+    rect, circle = scene.frame(1.0)
+    assert rect.alpha == 0.5 and rect.values["rotate"] == -80 and rect.pivot == "bottom-right"
+    assert rect.fill == "none"
+    assert circle.alpha == 0.25
+
+
+def test_bad_fill_and_pivot_fall_back_to_defaults():
+    (rect,) = scene_with({"type": "rect", "x": 1, "y": 0, "w": 1, "h": 1, "fill": "sparkly", "pivot": "top"}).frame(0)
+    assert rect.fill == "" and rect.pivot == "bottom-left"

@@ -20,6 +20,7 @@ from clicky.async_runner import AsyncRunner
 from clicky.audio_capture import MicrophoneStreamer
 from clicky.config import AVAILABLE_MODELS, EFFORT_LEVELS, ConfigError, load_settings
 from clicky.controller import CompanionController, PointTarget
+from clicky.dns_fallback import install_dns_fallback
 from clicky.followup_chips import FollowUpChips
 from clicky.fonts import load_fonts
 from clicky.hotkey import VK_ESCAPE, HotkeyParseError, HotkeyPoller, KeyTapWatcher, PushToTalkEvent, parse_hotkey
@@ -182,6 +183,8 @@ def main() -> int:
 
     try:
         settings = load_settings(os.environ)
+        # Some networks (mobile carriers) refuse *.workers.dev in DNS: look the Worker up over HTTPS then.
+        install_dns_fallback([urlparse(settings.worker_base_url).hostname or ""])
         parsed_hotkey = parse_hotkey(settings.hotkey)
     except (ConfigError, HotkeyParseError) as settings_error:
         show_fatal_error(str(settings_error))

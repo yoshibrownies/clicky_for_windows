@@ -144,3 +144,10 @@ def test_prompt_asks_for_motion_and_build_up():
     assert len(bullet) < 700  # every request pays for the prompt: keep the addition small
     for topic_word in ("gear", "season", "lens", "interest"):  # stay general (no test-question topics)
         assert topic_word not in bullet, topic_word
+
+
+def test_prompt_says_a_rect_needs_a_centre_pivot_to_spin():
+    lowered = COMPANION_SYSTEM_PROMPT.lower()
+    start = lowered.index("- make it move:")
+    bullet = lowered[start : lowered.index("\n", start)]
+    assert 'pivot "center"' in bullet

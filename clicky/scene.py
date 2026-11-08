@@ -95,6 +95,21 @@ def _ease(progress: float) -> float:
     return progress * progress * (3.0 - 2.0 * progress)
 
 
+def _direction(change: float) -> int:
+    return (change > 0) - (change < 0)
+
+
+def _ease_segment(progress: float, ease_in: bool, ease_out: bool) -> float:
+    progress = max(0.0, min(1.0, progress))
+    if ease_in and ease_out:
+        return _ease(progress)
+    if ease_in:
+        return progress * progress
+    if ease_out:
+        return progress * (2.0 - progress)
+    return progress
+
+
 def _number_property(raw) -> NumberValue | None:
     """Constant, formula string or [[time, value], ...] keyframes, as a function of (t, x)."""
     if _is_number(raw):
@@ -110,16 +125,20 @@ def _number_property(raw) -> NumberValue | None:
                 return None
             keyframes.append((float(entry[0]), float(entry[1])))
         keyframes.sort(key=lambda pair: pair[0])
+        # Ease only where motion starts, stops or turns back: a straight run through several keyframes keeps going.
+        directions = [_direction(b[1] - a[1]) for a, b in zip(keyframes, keyframes[1:], strict=False)]
 
         def interpolate(t: float, x: float = 0.0) -> float:
             if t <= keyframes[0][0]:
                 return keyframes[0][1]
-            for (time_a, value_a), (time_b, value_b) in zip(keyframes, keyframes[1:], strict=False):
+            for index, ((time_a, value_a), (time_b, value_b)) in enumerate(zip(keyframes, keyframes[1:], strict=False)):
                 if t <= time_b:
                     span = time_b - time_a
                     if span <= 0:
                         return value_b
-                    return value_a + (value_b - value_a) * _ease((t - time_a) / span)
+                    ease_in = index == 0 or directions[index - 1] != directions[index]
+                    ease_out = index == len(directions) - 1 or directions[index + 1] != directions[index]
+                    return value_a + (value_b - value_a) * _ease_segment((t - time_a) / span, ease_in, ease_out)
             return keyframes[-1][1]
 
         return interpolate
@@ -178,6 +197,7 @@ class SceneObject:
     pivot: str = "bottom-left"
     opacity: NumberValue | None = None
     turn_centre_y: float = 0.0  # icons spin about their middle (half their height), not their base
+    moves: bool = False  # any number is a formula or keyframes (its motion is timed from t = 0)
 
 
 @dataclass
@@ -335,6 +355,8 @@ def _parse_object(raw) -> SceneObject | None:
     fill = _stepped_text_property(raw["fill"], 12, FILL_CHOICES) if kind in FILLABLE_KINDS and "fill" in raw else None
     pivot = raw.get("pivot") if raw.get("pivot") in PIVOTS else "bottom-left"
     opacity = _number_property(raw["opacity"]) if "opacity" in raw else None
+    number_names = (*REQUIRED_NUMBERS[kind], *OPTIONAL_NUMBERS.get(kind, {}), "opacity")
+    moves = kind == "plot" or any(isinstance(raw.get(name), (str, list)) for name in number_names)
     plot_function = None
     if kind == "plot":
         formula = compile_formula(raw.get("fn")) if isinstance(raw.get("fn"), str) else None
@@ -362,6 +384,7 @@ def _parse_object(raw) -> SceneObject | None:
         fill=fill,
         pivot=pivot,
         opacity=opacity,
+        moves=moves,
     )
 
 
@@ -413,12 +436,17 @@ def parse_scene(text: str) -> Scene | None:
 
     duration = float(data["duration"]) if _is_number(data.get("duration")) else DEFAULT_DURATION
     duration = max(MIN_DURATION, min(MAX_DURATION, duration))
-    if len(objects) >= 3 and all(scene_object.start == 0.0 for scene_object in objects):
-        # Nothing staged: build it up in the order written, finishing early enough to be fully in by the end.
+    # Nothing staged: build the still parts up in the order written, finishing early enough to be fully in by the
+    # end. Moving objects keep t = 0 (their motion is timed from it) and so do ones with an end (or they might vanish).
+    still_parts = [scene_object for scene_object in objects if not scene_object.moves and scene_object.end is None]
+    if len(still_parts) >= 3 and all(scene_object.start == 0.0 for scene_object in objects):
         window = min(STAGGER_WINDOW_SECONDS, max(0.0, duration - ENTRANCE_SECONDS - 0.05))
-        step = min(STAGGER_SECONDS, window / (len(objects) - 1))
-        for index, scene_object in enumerate(objects):
+        step = min(STAGGER_SECONDS, window / (len(still_parts) - 1))
+        for index, scene_object in enumerate(still_parts):
             scene_object.start = index * step
+    latest_start = max(0.0, duration - ENTRANCE_SECONDS)  # fully in by the last frame (the card's still picture)
+    for scene_object in objects:
+        scene_object.start = min(scene_object.start, latest_start)
 
     world = DEFAULT_WORLD
     raw_world = data.get("world")

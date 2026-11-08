@@ -133,3 +133,14 @@ def test_prompt_asks_for_a_sequence_of_pictures_that_follows_the_steps():
     assert "slower to arrive" not in lowered
     assert "doesn't replace the step-by-step animations" in lowered
     assert "keep each scene small" in lowered  # small scenes still keep answers quick
+
+
+def test_prompt_asks_for_motion_and_build_up():
+    lowered = COMPANION_SYSTEM_PROMPT.lower()
+    start = lowered.index("- make it move:")
+    bullet = lowered[start : lowered.index("\n", start)]
+    for phrase in ("show the key idea", "by motion", "start times", "stock icon", "won't sit on other text"):
+        assert phrase in bullet, phrase
+    assert len(bullet) < 700  # every request pays for the prompt: keep the addition small
+    for topic_word in ("gear", "season", "lens", "interest"):  # stay general (no test-question topics)
+        assert topic_word not in bullet, topic_word

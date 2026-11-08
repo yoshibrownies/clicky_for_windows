@@ -98,19 +98,20 @@ def _fill_color(item: DrawItem, default_alpha: float) -> QColor | None:
 
 
 def figure_pixel_points(item: DrawItem, mapper: WorldMapper) -> list[list[QPointF]]:
-    """A path's or icon's outline in pixels: scaled uniformly (by the y axis), rotated counter-clockwise, then
-    placed at (x, y)."""
+    """A path's or icon's outline in pixels: scaled uniformly (by the y axis), rotated counter-clockwise (an icon
+    about its middle, so a turning figure spins in place; a path about its own origin), then placed at (x, y)."""
     anchor_x, anchor_y = mapper.to_pixel(item.values["x"], item.values["y"])
     size = item.values.get("size", item.values.get("scale", 1.0)) * (0.85 + 0.15 * item.entrance)  # grows in
     pixel_scale = max(-PIXEL_LIMIT, min(PIXEL_LIMIT, size * mapper.scale_y))
     angle = math.radians(item.values.get("rotate", 0.0))
     cos_a, sin_a = math.cos(angle), math.sin(angle)
+    centre_y = item.turn_centre_y
     outlines: list[list[QPointF]] = []
     for segment in item.segments:
         outline = []
         for local_x, local_y in segment:
-            rotated_x = local_x * cos_a - local_y * sin_a
-            rotated_y = local_x * sin_a + local_y * cos_a
+            rotated_x = local_x * cos_a - (local_y - centre_y) * sin_a
+            rotated_y = local_x * sin_a + (local_y - centre_y) * cos_a + centre_y
             pixel_x = max(-PIXEL_LIMIT, min(PIXEL_LIMIT, anchor_x + rotated_x * pixel_scale))
             pixel_y = max(-PIXEL_LIMIT, min(PIXEL_LIMIT, anchor_y - rotated_y * pixel_scale))
             outline.append(QPointF(pixel_x, pixel_y))

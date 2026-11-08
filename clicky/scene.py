@@ -177,6 +177,7 @@ class SceneObject:
     fill: Callable[[float], str] | None = None
     pivot: str = "bottom-left"
     opacity: NumberValue | None = None
+    turn_centre_y: float = 0.0  # icons spin about their middle (half their height), not their base
 
 
 @dataclass
@@ -193,6 +194,7 @@ class DrawItem:
     fill: str = ""  # a palette colour, "none", or "" for the kind's usual look
     pivot: str = "bottom-left"
     entrance: float = 1.0  # 0..1 while easing in
+    turn_centre_y: float = 0.0
 
 
 @dataclass
@@ -268,6 +270,7 @@ def _draw_object(scene_object: SceneObject, t: float) -> DrawItem | None:
         fill=scene_object.fill(t) if scene_object.fill else "",
         pivot=scene_object.pivot,
         entrance=_entrance(scene_object, t),
+        turn_centre_y=scene_object.turn_centre_y,
     )
     if scene_object.subpaths is not None:
         item.segments = partial_subpaths(scene_object.subpaths, max(0.0, min(1.0, values.get("draw", 1.0))))
@@ -355,6 +358,7 @@ def _parse_object(raw) -> SceneObject | None:
         end=end,
         plot_function=plot_function,
         subpaths=subpaths,
+        turn_centre_y=(max(y for points in subpaths for _, y in points) / 2) if kind == "icon" else 0.0,
         fill=fill,
         pivot=pivot,
         opacity=opacity,

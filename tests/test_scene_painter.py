@@ -243,3 +243,18 @@ def test_overlapping_texts_are_nudged_apart(qt_app):
     _, scene_painter = paint_to_image(scene, 3.0)
     first, second = scene_painter.text_rects
     assert not first.intersects(second)
+
+
+def test_a_rotating_icon_spins_in_place(qt_app):
+    from clicky.scene_painter import WorldMapper, figure_pixel_points
+
+    def centre_of(rotate):
+        scene = single_object_scene({"type": "icon", "name": "gear", "x": 5, "y": 2, "size": 3, "rotate": rotate})
+        (item,) = scene.frame(2.0)
+        mapper = WorldMapper(scene.world, (0, 0, 400, 300))
+        points = [point for outline in figure_pixel_points(item, mapper) for point in outline]
+        xs, ys = [point.x() for point in points], [point.y() for point in points]
+        return ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+
+    still, turned = centre_of(0), centre_of(90)
+    assert abs(still[0] - turned[0]) < 3 and abs(still[1] - turned[1]) < 3  # turns about its own middle

@@ -186,3 +186,60 @@ def test_huge_paths_never_send_the_pen_off_into_space(qt_app):
     assert point is not None
     assert 0 <= point.x() <= 420 and 0 <= point.y() <= 260  # kept inside the animation panel
     assert PIXEL_LIMIT == 10_000.0
+
+
+# ---------- entrances and readable text ----------
+
+
+def single_object_scene(scene_object):
+    return parse_scene(json.dumps({"duration": 4, "world": {"x": [0, 10], "y": [0, 10]}, "objects": [scene_object]}))
+
+
+def red_extent(image, axis="x"):
+    hits = [
+        (x, y)
+        for x in range(0, image.width(), 2)
+        for y in range(0, image.height(), 2)
+        if image.pixelColor(x, y).red() > 150
+        and image.pixelColor(x, y).green() < 120
+        and image.pixelColor(x, y).alpha() > 60
+    ]
+    values = [x if axis == "x" else y for x, y in hits]
+    return (max(values) - min(values)) if values else 0
+
+
+def test_entering_shapes_grow_into_place(qt_app):
+    from clicky.scene import ENTRANCE_SECONDS
+
+    scene = single_object_scene({"type": "circle", "x": 5, "y": 5, "r": 40, "color": "red", "label": "dot"})
+    _, entering = paint_to_image(scene, ENTRANCE_SECONDS * 0.3, highlight=("dot", 0.5))
+    entering_width = entering.highlight_rect.width()
+    _, settled = paint_to_image(scene, 2.0, highlight=("dot", 0.5))
+    assert entering_width < settled.highlight_rect.width() - 10
+
+
+def test_arrows_draw_along_their_length_while_entering(qt_app):
+    from clicky.scene import ENTRANCE_SECONDS
+
+    scene = single_object_scene({"type": "arrow", "x": 1, "y": 5, "dx": 8, "dy": 0, "color": "red"})
+    entering_image, _ = paint_to_image(scene, ENTRANCE_SECONDS * 0.4)
+    settled_image, _ = paint_to_image(scene, 2.0)
+    assert red_extent(entering_image) < red_extent(settled_image) * 0.8
+
+
+def test_overlapping_texts_are_nudged_apart(qt_app):
+    scene = parse_scene(
+        json.dumps(
+            {
+                "duration": 4,
+                "world": {"x": [0, 10], "y": [0, 10]},
+                "objects": [
+                    {"type": "text", "x": 3, "y": 5, "text": "output: 2 turns"},
+                    {"type": "text", "x": 4, "y": 5, "text": "input: 1 turn"},
+                ],
+            }
+        )
+    )
+    _, scene_painter = paint_to_image(scene, 3.0)
+    first, second = scene_painter.text_rects
+    assert not first.intersects(second)

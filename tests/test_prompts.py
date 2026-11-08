@@ -118,9 +118,18 @@ def test_the_figure_library_stays_general_purpose():
     assert not {"brain", "neuron", "synapse", "domino"} & set(ICON_NAMES)
 
 
-def test_prompt_warns_that_paths_are_y_up_and_keeps_scene_counts_lean():
+def test_prompt_warns_that_paths_are_y_up():
     lowered = COMPANION_SYSTEM_PROMPT.lower()
     assert "y points up, unlike svg" in lowered  # otherwise remembered svg shapes draw upside down
     assert "no a, s or t" in lowered  # unsupported commands would silently drop the drawing
-    assert "only as many as the ideas need" in lowered
-    assert "2 to 4 in all" not in lowered
+
+
+def test_prompt_asks_for_a_sequence_of_pictures_that_follows_the_steps():
+    # Live probes (4 questions, gpt-6.1-terra): "only as many as the ideas need, since every scene makes the answer
+    # slower" plus "use a diagram for processes" gave 0-1 animations per answer; asking for one picture per step gave 2.
+    lowered = COMPANION_SYSTEM_PROMPT.lower()
+    assert "not one picture for everything" in lowered
+    assert "2 to 4 in all" in lowered
+    assert "slower to arrive" not in lowered
+    assert "doesn't replace the step-by-step animations" in lowered
+    assert "keep each scene small" in lowered  # small scenes still keep answers quick

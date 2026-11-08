@@ -48,10 +48,14 @@ def test_voice_defaults_to_kokoro_af_heart():
     assert settings.voice_engine == "kokoro"
     assert settings.kokoro_voice == "af_heart"
 
+
 def test_voice_engine_and_kokoro_voice_are_read_case_insensitively():
-    settings = load_settings({"CLICKY_WORKER_URL": "http://localhost:8787", "CLICKY_VOICE": "ElevenLabs", "CLICKY_KOKORO_VOICE": "bf_emma"})
+    settings = load_settings(
+        {"CLICKY_WORKER_URL": "http://localhost:8787", "CLICKY_VOICE": "ElevenLabs", "CLICKY_KOKORO_VOICE": "bf_emma"}
+    )
     assert settings.voice_engine == "elevenlabs"
     assert settings.kokoro_voice == "bf_emma"
+
 
 def test_unknown_voice_engine_is_a_config_error():
     with pytest.raises(ConfigError, match="CLICKY_VOICE"):
@@ -88,13 +92,20 @@ def test_encode_wav_writes_mono_16_bit_clipped_samples():
         assert (reader.getnchannels(), reader.getsampwidth(), reader.getframerate()) == (1, 2, 24000)
         assert struct.unpack("<4h", reader.readframes(4)) == (0, 16383, -32767, 32767)
 
-def test_synthesize_returns_wav_and_passes_voice_speed_lang(tmp_path): ...
+
+def test_synthesize_returns_wav_and_passes_voice_speed_lang(tmp_path):
+    ...
     # assert bytes start with b"RIFF"; fake.create called once with voice="af_heart", speed=1.0, lang="en-us"
 
-def test_model_loads_once_across_calls(tmp_path): ...   # factory called once after load() + 2 synthesize()
-def test_missing_model_raises_tts_error_naming_the_script(tmp_path): ...  # match="download_kokoro.py"; factory never called
-def test_blank_text_raises_tts_error(tmp_path): ...     # "   " → TTSError("Nothing to speak.")
-def test_synthesis_error_becomes_tts_error(tmp_path): ...  # fake .create raises ValueError("bad voice") → TTSError match "bad voice"
+
+def test_model_loads_once_across_calls(tmp_path): ...  # factory called once after load() + 2 synthesize()
+def test_missing_model_raises_tts_error_naming_the_script(
+    tmp_path,
+): ...  # match="download_kokoro.py"; factory never called
+def test_blank_text_raises_tts_error(tmp_path): ...  # "   " → TTSError("Nothing to speak.")
+def test_synthesis_error_becomes_tts_error(
+    tmp_path,
+): ...  # fake .create raises ValueError("bad voice") → TTSError match "bad voice"
 ```
 
 - [ ] **Step 2: Run** `pytest tests/test_kokoro_voice.py -q` → FAIL (module missing).
@@ -165,8 +176,10 @@ def test_audio_file_suffix_detects_wav_and_defaults_to_mp3():
 - [ ] **Step 1: Write failing tests** (httpx `MockTransport` serving fixed bytes)
 
 ```python
-def test_download_keeps_file_with_matching_checksum(tmp_path): ...       # destination exists, no .part left
-def test_download_deletes_file_with_wrong_checksum(tmp_path): ...        # raises ValueError; neither destination nor .part exists
+def test_download_keeps_file_with_matching_checksum(tmp_path): ...  # destination exists, no .part left
+def test_download_deletes_file_with_wrong_checksum(
+    tmp_path,
+): ...  # raises ValueError; neither destination nor .part exists
 def test_model_files_pin_the_published_checksums():
     assert MODEL_FILES == {
         "kokoro-v1.0.int8.onnx": "ae315a79b623f244700e4afb9246c46a26066782e049ba174bf3ba433970ee9c",

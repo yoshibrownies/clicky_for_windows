@@ -26,6 +26,11 @@ MAX_DURATION = 30.0
 DEFAULT_DURATION = 8.0
 DEFAULT_WORLD = (0.0, 10.0, 0.0, 10.0)
 FADE_SECONDS = 0.25
+# Every object eases in when it appears (fade + grow; lines draw along their length).
+ENTRANCE_SECONDS = 0.45
+# A scene that stages nothing builds up anyway: objects appear in listed order, this far apart, within the window.
+STAGGER_SECONDS = 0.18
+STAGGER_WINDOW_SECONDS = 1.2
 CAPTION_FADE_SECONDS = 0.3
 TRAIL_SAMPLES = 30
 PLOT_SAMPLES = 60
@@ -84,6 +89,12 @@ def _is_number(value) -> bool:
         return False
 
 
+def _ease(progress: float) -> float:
+    """Smoothstep: starts and ends gently, so moves and entrances don't jerk."""
+    progress = max(0.0, min(1.0, progress))
+    return progress * progress * (3.0 - 2.0 * progress)
+
+
 def _number_property(raw) -> NumberValue | None:
     """Constant, formula string or [[time, value], ...] keyframes, as a function of (t, x)."""
     if _is_number(raw):
@@ -106,7 +117,9 @@ def _number_property(raw) -> NumberValue | None:
             for (time_a, value_a), (time_b, value_b) in zip(keyframes, keyframes[1:], strict=False):
                 if t <= time_b:
                     span = time_b - time_a
-                    return value_b if span <= 0 else value_a + (value_b - value_a) * (t - time_a) / span
+                    if span <= 0:
+                        return value_b
+                    return value_a + (value_b - value_a) * _ease((t - time_a) / span)
             return keyframes[-1][1]
 
         return interpolate
@@ -179,6 +192,7 @@ class DrawItem:
     segments: list[list[tuple[float, float]]] = field(default_factory=list)
     fill: str = ""  # a palette colour, "none", or "" for the kind's usual look
     pivot: str = "bottom-left"
+    entrance: float = 1.0  # 0..1 while easing in
 
 
 @dataclass
@@ -217,12 +231,14 @@ class Scene:
         return items
 
 
+def _entrance(scene_object: SceneObject, t: float) -> float:
+    return _ease((t - scene_object.start) / ENTRANCE_SECONDS)
+
+
 def _visibility(scene_object: SceneObject, t: float) -> float:
     if t < scene_object.start or (scene_object.end is not None and t > scene_object.end):
         return 0.0
-    alpha = 1.0
-    if scene_object.start > 0:
-        alpha = min(alpha, (t - scene_object.start) / FADE_SECONDS)
+    alpha = _entrance(scene_object, t)
     if scene_object.end is not None:
         alpha = min(alpha, (scene_object.end - t) / FADE_SECONDS)
     return max(0.0, min(1.0, alpha))
@@ -251,6 +267,7 @@ def _draw_object(scene_object: SceneObject, t: float) -> DrawItem | None:
         dashed=scene_object.dashed,
         fill=scene_object.fill(t) if scene_object.fill else "",
         pivot=scene_object.pivot,
+        entrance=_entrance(scene_object, t),
     )
     if scene_object.subpaths is not None:
         item.segments = partial_subpaths(scene_object.subpaths, max(0.0, min(1.0, values.get("draw", 1.0))))
@@ -392,6 +409,12 @@ def parse_scene(text: str) -> Scene | None:
 
     duration = float(data["duration"]) if _is_number(data.get("duration")) else DEFAULT_DURATION
     duration = max(MIN_DURATION, min(MAX_DURATION, duration))
+    if len(objects) >= 3 and all(scene_object.start == 0.0 for scene_object in objects):
+        # Nothing staged: build it up in the order written, finishing early enough to be fully in by the end.
+        window = min(STAGGER_WINDOW_SECONDS, max(0.0, duration - ENTRANCE_SECONDS - 0.05))
+        step = min(STAGGER_SECONDS, window / (len(objects) - 1))
+        for index, scene_object in enumerate(objects):
+            scene_object.start = index * step
 
     world = DEFAULT_WORLD
     raw_world = data.get("world")

@@ -150,8 +150,8 @@ def test_a_rotated_rect_is_drawn_where_it_has_tipped_to(qt_app):
             }
         )
     )
-    upright_image, _ = paint_to_image(upright, 0)
-    tipped_image, _ = paint_to_image(tipped, 0)
+    upright_image, _ = paint_to_image(upright, 1.0)
+    tipped_image, _ = paint_to_image(tipped, 1.0)
 
     def red_columns(image):
         return {x for x in range(420) for y in range(0, 260, 3) if image.pixelColor(x, y).red() > 150}
@@ -181,7 +181,7 @@ def test_huge_paths_never_send_the_pen_off_into_space(qt_app):
             }
         )
     )
-    _, scene_painter = paint_to_image(huge, 0)
+    _, scene_painter = paint_to_image(huge, 1.0)
     point = scene_painter.focus_point
     assert point is not None
     assert 0 <= point.x() <= 420 and 0 <= point.y() <= 260  # kept inside the animation panel

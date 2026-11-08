@@ -60,6 +60,7 @@ class ClickyTray(QObject):
         effort_levels: Mapping[str, str] | None = None,
         selected_effort: str = "medium",
         notepad_visible: bool = True,
+        version_text: str = "",
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -74,6 +75,10 @@ class ClickyTray(QObject):
         hint_action = QAction(f"Hold {self.pretty_hotkey} and talk", self._menu)
         hint_action.setEnabled(False)
         self._menu.addAction(hint_action)
+        if version_text:  # which code is running (branch and commit), to check a restart picked up the latest
+            version_action = QAction(f"Version {version_text}", self._menu)
+            version_action.setEnabled(False)
+            self._menu.addAction(version_action)
         self._menu.addSeparator()
 
         model_menu = self._menu.addMenu("Model")

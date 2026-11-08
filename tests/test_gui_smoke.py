@@ -279,3 +279,17 @@ def test_speech_player_uses_the_current_default_output_each_time(qt_app, monkeyp
     player.play(b"not really an mp3")
     player.stop()
     assert chosen_devices == ["speakers", "headphones"]
+
+
+def test_tray_shows_the_running_version(qt_app):
+    from clicky.tray import ClickyTray
+
+    tray = ClickyTray(
+        hotkey_text="win+alt",
+        models=AVAILABLE_MODELS,
+        selected_model="gpt-6.1-terra",
+        always_visible=True,
+        version_text="b9602de (feat/initial-app)",
+    )
+    texts = [action.text() for action in tray._menu.actions()]
+    assert "Version b9602de (feat/initial-app)" in texts

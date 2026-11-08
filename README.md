@@ -58,6 +58,9 @@ release.
 
 **Start with Windows:** press Win + R, type `shell:startup`, and put a shortcut to `Clicky.bat` in that folder.
 
+**Pick up new code:** double-click **`Restart-Clicky.bat`** after changing or merging code. The tray menu's
+"Version" line (also in the log's "Clicky started" line) shows the branch and commit now running.
+
 ## What it does while it talks
 Clicky explains properly (several sentences, an intuition, an example) and shows you as it goes:
 - **A lesson card** slides in at the side of your screen: a soft-green card with a title bar, a big

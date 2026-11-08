@@ -6,6 +6,8 @@ Python 3.13 + PySide6 port of farzaa/clicky. Read `docs/design.md` before changi
 - Tests: `.venv\Scripts\python -m pytest -q` (Qt runs offscreen via `tests/conftest.py`)
 - Lint/format: `.venv\Scripts\ruff check .` and `.venv\Scripts\ruff format .`
 - Run: `.venv\Scripts\python -m clicky` (needs `CLICKY_WORKER_URL`)
+- Live copy: Clicky runs from the main folder on `feat/initial-app`. Sessions work in worktrees; to go live, bring in
+  `feat/initial-app`, fast-forward it, then `Restart-Clicky.bat`. The tray "Version" line shows the running commit.
 
 ## Rules
 - `worker/` is the upstream Worker plus two deliberate changes: an added `/chat-openai` route (OpenAI Chat

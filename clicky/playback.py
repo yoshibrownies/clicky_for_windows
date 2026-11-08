@@ -1,4 +1,4 @@
-"""Plays the ElevenLabs MP3 reply with QtMultimedia (GUI thread)."""
+"""Plays the spoken reply (an ElevenLabs MP3 or a Kokoro WAV) with QtMultimedia (GUI thread)."""
 
 from __future__ import annotations
 
@@ -24,8 +24,13 @@ def progress_fraction(position_ms: int, duration_ms: int) -> float | None:
     return min(1.0, max(0.0, position_ms / duration_ms))
 
 
+def audio_file_suffix(audio: bytes) -> str:
+    """ ".wav" for a RIFF/WAV header (Kokoro), else ".mp3" (ElevenLabs): Qt picks the decoder from the extension."""
+    return ".wav" if audio[:4] == b"RIFF" else ".mp3"
+
+
 class SpeechPlayer(QObject):
-    """play(mp3_bytes) / stop(). Emits `finished` once per play, whether it ended, failed or was stopped."""
+    """play(audio_bytes) / stop(). Emits `finished` once per play, whether it ended, failed or was stopped."""
 
     finished = Signal()
     started = Signal()
@@ -53,13 +58,13 @@ class SpeechPlayer(QObject):
     def is_playing(self) -> bool:
         return self._is_playing
 
-    def play(self, mp3_audio: bytes) -> None:
+    def play(self, audio: bytes) -> None:
         self.stop()
         self._use_default_output_device()
         # A temp file is the most reliable source across Qt's Windows media backends.
-        file_descriptor, file_path = tempfile.mkstemp(prefix="clicky-reply-", suffix=".mp3")
-        with os.fdopen(file_descriptor, "wb") as mp3_file:
-            mp3_file.write(mp3_audio)
+        file_descriptor, file_path = tempfile.mkstemp(prefix="clicky-reply-", suffix=audio_file_suffix(audio))
+        with os.fdopen(file_descriptor, "wb") as audio_file:
+            audio_file.write(audio)
         self._current_file_path = file_path
         self._is_playing = True
         self._player.setSource(QUrl.fromLocalFile(file_path))

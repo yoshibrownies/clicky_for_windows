@@ -24,6 +24,7 @@ from clicky.dns_fallback import install_dns_fallback
 from clicky.followup_chips import FollowUpChips
 from clicky.fonts import load_fonts
 from clicky.hotkey import VK_ESCAPE, HotkeyParseError, HotkeyPoller, KeyTapWatcher, PushToTalkEvent, parse_hotkey
+from clicky.kokoro_voice import KokoroSpeech, default_model_dir
 from clicky.lesson_card import DEFAULT_LINGER_SECONDS, LessonCard
 from clicky.overlay import BuddyOverlay
 from clicky.playback import SpeechPlayer
@@ -193,8 +194,9 @@ def main() -> int:
         logger.warning("CLICKY_MODEL %s isn't in the tray menu list; using it anyway", settings.model)
 
     runner = AsyncRunner()
-    services = WorkerServices(settings)
-    # ElevenLabs MP3s, with Windows' own voice as the fallback when they can't be fetched (e.g. credits used up).
+    # Kokoro (local, free) or ElevenLabs per CLICKY_VOICE; Windows' own voice speaks when that voice can't.
+    services = WorkerServices(settings, kokoro_speech=KokoroSpeech(default_model_dir(), settings.kokoro_voice))
+    runner.submit(services.warm_up_voice())
     player = VoiceOutput(SpeechPlayer(), SystemVoice())
     overlay = BuddyOverlay()
     controller = CompanionController(

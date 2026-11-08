@@ -57,3 +57,22 @@ def test_effort_levels_and_models_for_the_tray():
     assert "gpt-6.1-sol" in AVAILABLE_MODELS
     # Claude is hidden while the Worker's Anthropic key is rejected (401); its code path stays for later.
     assert not any(model.startswith("claude") for model in AVAILABLE_MODELS)
+
+
+def test_voice_defaults_to_kokoro_af_heart():
+    settings = load_settings({"CLICKY_WORKER_URL": "http://localhost:8787"})
+    assert settings.voice_engine == "kokoro"
+    assert settings.kokoro_voice == "af_heart"
+
+
+def test_voice_engine_and_kokoro_voice_are_read_case_insensitively():
+    settings = load_settings(
+        {"CLICKY_WORKER_URL": "http://localhost:8787", "CLICKY_VOICE": "ElevenLabs", "CLICKY_KOKORO_VOICE": "bf_emma"}
+    )
+    assert settings.voice_engine == "elevenlabs"
+    assert settings.kokoro_voice == "bf_emma"
+
+
+def test_unknown_voice_engine_is_a_config_error():
+    with pytest.raises(ConfigError, match="CLICKY_VOICE"):
+        load_settings({"CLICKY_WORKER_URL": "http://localhost:8787", "CLICKY_VOICE": "siri"})

@@ -12,6 +12,10 @@ DEFAULT_EFFORT = "medium"
 # Tray "Thinking" menu labels. Same names work for Claude (output_config.effort) and OpenAI (reasoning_effort).
 EFFORT_LEVELS = {"low": "Fast", "medium": "Balanced", "high": "Deep"}
 ALLOWED_EFFORT_LEVELS = tuple(EFFORT_LEVELS)
+# "kokoro": free local neural voice (kokoro_voice.py). "elevenlabs": the Worker's /tts route, uses monthly credits.
+VOICE_ENGINES = ("kokoro", "elevenlabs")
+DEFAULT_VOICE_ENGINE = "kokoro"
+DEFAULT_KOKORO_VOICE = "af_heart"
 # Tray "Model" menu. Claude models are hidden while the Worker's Anthropic key is rejected (401). The /chat route
 # and claude_client.py still work: to bring them back, fix the key (wrangler secret put ANTHROPIC_API_KEY) and add
 # "claude-opus-5-5": "Claude Opus 5.5" and "claude-sonnet-5-5": "Claude Sonnet 5.5" here.
@@ -40,6 +44,8 @@ class Settings:
     hotkey: str
     model: str
     effort: str
+    voice_engine: str = DEFAULT_VOICE_ENGINE
+    kokoro_voice: str = DEFAULT_KOKORO_VOICE
 
     @property
     def chat_url(self) -> str:
@@ -81,9 +87,15 @@ def load_settings(environment: Mapping[str, str]) -> Settings:
     if effort not in ALLOWED_EFFORT_LEVELS:
         raise ConfigError(f"CLICKY_EFFORT must be one of {', '.join(ALLOWED_EFFORT_LEVELS)}, got {effort!r}")
 
+    voice_engine = _read_value(environment, "CLICKY_VOICE", DEFAULT_VOICE_ENGINE).lower()
+    if voice_engine not in VOICE_ENGINES:
+        raise ConfigError(f"CLICKY_VOICE must be one of {', '.join(VOICE_ENGINES)}, got {voice_engine!r}")
+
     return Settings(
         worker_base_url=worker_url,
         hotkey=_read_value(environment, "CLICKY_HOTKEY", DEFAULT_HOTKEY).lower(),
         model=_read_value(environment, "CLICKY_MODEL", DEFAULT_MODEL),
         effort=effort,
+        voice_engine=voice_engine,
+        kokoro_voice=_read_value(environment, "CLICKY_KOKORO_VOICE", DEFAULT_KOKORO_VOICE),
     )

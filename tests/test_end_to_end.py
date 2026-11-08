@@ -94,7 +94,13 @@ def test_full_interaction_over_real_network_code(qt_app, fake_worker_url):
     try:
         websocket_port = websocket_server.sockets[0].getsockname()[1]
         # The Claude /chat contract (hidden from the tray, still supported).
-        settings = load_settings({"CLICKY_WORKER_URL": fake_worker_url + "/", "CLICKY_MODEL": "claude-opus-5-5"})
+        settings = load_settings(
+            {
+                "CLICKY_VOICE": "elevenlabs",
+                "CLICKY_WORKER_URL": fake_worker_url + "/",
+                "CLICKY_MODEL": "claude-opus-5-5",
+            }
+        )
         services = WorkerServices(settings, assemblyai_websocket_base_url=f"ws://127.0.0.1:{websocket_port}/v3/ws")
         player = FakePlayer()
         controller = CompanionController(
@@ -143,7 +149,9 @@ def test_full_interaction_over_real_network_code(qt_app, fake_worker_url):
 def test_worker_down_reports_a_readable_notice(qt_app):
     runner = AsyncRunner()
     try:
-        settings = load_settings({"CLICKY_WORKER_URL": "http://127.0.0.1:9"})  # nothing listens on port 9
+        settings = load_settings(
+            {"CLICKY_VOICE": "elevenlabs", "CLICKY_WORKER_URL": "http://127.0.0.1:9"}
+        )  # nothing listens on port 9
         services = WorkerServices(settings)
         controller = CompanionController(
             runner=runner,
@@ -175,7 +183,9 @@ def test_openai_model_goes_through_the_chat_openai_route(qt_app, fake_worker_url
     websocket_server = runner.run(start_fake_assemblyai(), timeout=5)
     try:
         websocket_port = websocket_server.sockets[0].getsockname()[1]
-        settings = load_settings({"CLICKY_WORKER_URL": fake_worker_url, "CLICKY_MODEL": "gpt-6.1-terra"})
+        settings = load_settings(
+            {"CLICKY_VOICE": "elevenlabs", "CLICKY_WORKER_URL": fake_worker_url, "CLICKY_MODEL": "gpt-6.1-terra"}
+        )
         services = WorkerServices(settings, assemblyai_websocket_base_url=f"ws://127.0.0.1:{websocket_port}/v3/ws")
         player = FakePlayer()
         controller = CompanionController(
@@ -230,7 +240,9 @@ def test_visual_tags_flow_from_the_model_to_the_drawing_sinks(qt_app, fake_worke
     websocket_server = runner.run(start_fake_assemblyai(), timeout=5)
     try:
         websocket_port = websocket_server.sockets[0].getsockname()[1]
-        settings = load_settings({"CLICKY_WORKER_URL": fake_worker_url, "CLICKY_MODEL": "gpt-6.1-terra"})
+        settings = load_settings(
+            {"CLICKY_VOICE": "elevenlabs", "CLICKY_WORKER_URL": fake_worker_url, "CLICKY_MODEL": "gpt-6.1-terra"}
+        )
         services = WorkerServices(settings, assemblyai_websocket_base_url=f"ws://127.0.0.1:{websocket_port}/v3/ws")
         player = FakePlayer()
         controller = CompanionController(
@@ -303,7 +315,9 @@ def test_an_animation_scene_flows_from_the_model_to_the_whiteboard_sink(qt_app, 
     websocket_server = runner.run(start_fake_assemblyai(), timeout=5)
     try:
         websocket_port = websocket_server.sockets[0].getsockname()[1]
-        settings = load_settings({"CLICKY_WORKER_URL": fake_worker_url, "CLICKY_MODEL": "gpt-6.1-terra"})
+        settings = load_settings(
+            {"CLICKY_VOICE": "elevenlabs", "CLICKY_WORKER_URL": fake_worker_url, "CLICKY_MODEL": "gpt-6.1-terra"}
+        )
         services = WorkerServices(settings, assemblyai_websocket_base_url=f"ws://127.0.0.1:{websocket_port}/v3/ws")
         controller = CompanionController(
             runner=runner,
@@ -364,7 +378,9 @@ def test_lesson_card_tags_and_followups_flow_to_their_sinks(qt_app, fake_worker_
     websocket_server = runner.run(start_fake_assemblyai(), timeout=5)
     try:
         websocket_port = websocket_server.sockets[0].getsockname()[1]
-        settings = load_settings({"CLICKY_WORKER_URL": fake_worker_url, "CLICKY_MODEL": "gpt-6.1-terra"})
+        settings = load_settings(
+            {"CLICKY_VOICE": "elevenlabs", "CLICKY_WORKER_URL": fake_worker_url, "CLICKY_MODEL": "gpt-6.1-terra"}
+        )
         services = WorkerServices(settings, assemblyai_websocket_base_url=f"ws://127.0.0.1:{websocket_port}/v3/ws")
         controller = CompanionController(
             runner=runner,

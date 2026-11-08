@@ -114,7 +114,8 @@ class SystemVoice(QObject):
 
 
 class VoiceOutput(QObject):
-    """One player for the controller: ElevenLabs MP3s through `play`, the Windows voice through `speak_text`."""
+    """One player for the controller: Kokoro WAVs / ElevenLabs MP3s through `play`, the Windows voice through
+    `speak_text`."""
 
     started = Signal()
     progress = Signal(float)
@@ -135,9 +136,9 @@ class VoiceOutput(QObject):
     def is_playing(self) -> bool:
         return self._player.is_playing or self._voice.is_playing
 
-    def play(self, mp3_audio: bytes) -> None:
+    def play(self, audio: bytes) -> None:
         self._voice.stop()
-        self._player.play(mp3_audio)
+        self._player.play(audio)
 
     def speak_text(self, text: str) -> None:
         self._player.stop()

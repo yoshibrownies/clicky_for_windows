@@ -32,9 +32,13 @@ Python 3.13 + PySide6 port of farzaa/clicky. Read `docs/design.md` before changi
   (`icons.py` library); up to `MAX_ANIMATIONS` (4) scenes per reply, one per step of the explanation. Prompt icon names must
   match `icons.ICON_NAMES` (tested). Stay general: no topic-specific icons or worked examples (Yoshi: "do not overfit");
   subject-specific drawings come from the model's own `path` sketches. Design: `docs/superpowers/specs/2026-11-07-illustrated-explanations-design.md`.
-- Voice: `VoiceOutput` (`system_voice.py`) plays ElevenLabs MP3s and falls back to Windows' own voice (Qt
-  `QTextToSpeech`, word progress) when the voice can't be fetched; after `quota_exceeded` ElevenLabs isn't asked again
-  until restart. Tests use the silent `mock` engine. Design: `docs/superpowers/specs/2026-11-07-system-voice-fallback-design.md`.
+- Voice: `CLICKY_VOICE=kokoro` (default) makes a WAV locally with Kokoro-82M (`kokoro_voice.py`, in a worker thread via
+  `WorkerServices.fetch_speech`; model from `scripts/download_kokoro.py`, never downloaded at run time; `kokoro_onnx`
+  imported lazily so tests don't need it). `CLICKY_VOICE=elevenlabs` uses the Worker's `/tts` MP3s. `VoiceOutput`
+  (`system_voice.py`) plays either and falls back to Windows' own voice (Qt `QTextToSpeech`, word progress) when the
+  voice can't be made; after `quota_exceeded` ElevenLabs isn't asked again until restart. Tests use the silent `mock`
+  engine and a fake Kokoro. Design: `docs/superpowers/specs/2026-11-07-system-voice-fallback-design.md`,
+  `docs/superpowers/specs/2026-11-08-kokoro-local-voice-design.md`.
 - Network: `dns_fallback.install_dns_fallback` (called in `app.main` at startup) backs up the system lookup of the Worker host
   with DNS-over-HTTPS (1.1.1.1, then 8.8.8.8) for networks that refuse `*.workers.dev`; other hosts untouched.
   Design: `docs/superpowers/specs/2026-11-07-worker-dns-fallback-design.md`.

@@ -9,7 +9,7 @@ Python + Qt. It uses the original Cloudflare Worker (plus an optional OpenAI rou
 
 ```
 hold Win+Alt ─▶ mic ─▶ AssemblyAI (live transcript)
-release       ─▶ screenshot every monitor ─▶ Claude (streamed) ─▶ ElevenLabs voice
+release       ─▶ screenshot every monitor ─▶ Claude (streamed) ─▶ Kokoro voice (local)
                                               └─▶ [POINT:x,y:label] ─▶ buddy flies there
 ```
 
@@ -47,6 +47,15 @@ py -3.13 -m venv .venv
 copy .env.example .env
 ```
 Open `.env` and set `CLICKY_WORKER_URL` to your Worker URL. That's the only required setting.
+
+**Free local voice (Kokoro, the default):** download the voice model once (~142 MB, checksum-verified, into
+`%LOCALAPPDATA%\Clicky\models`):
+```bash
+.venv\Scripts\python scripts\download_kokoro.py
+```
+Kokoro runs on your CPU: free, no monthly limit, works offline. Pick another voice with `CLICKY_KOKORO_VOICE`
+(e.g. `am_michael`, `bf_emma`). To use ElevenLabs instead (uses its monthly credits), set `CLICKY_VOICE=elevenlabs`.
+If the chosen voice can't speak, Windows' own voice says the answer.
 
 ### 3. Run it
 Double-click **`Clicky.bat`** (no console window), or for logs in a terminal:
@@ -119,7 +128,8 @@ ElevenLabs usage. Check your dashboards after the first few days.
 | `clicky/lesson_card.py`, `handwriting.py`, `diagram.py` | The soft-green lesson card (Inter + Geist Mono): notes, formulas, diagrams, inline animations |
 | `clicky/scene.py`, `expressions.py`, `scene_painter.py` | The animation language: JSON scenes with safe formulas and keyframes |
 | `clicky/followup_chips.py`, `status_pill.py` | Clickable follow-up questions; the Listening/Thinking/Speaking pill |
-| `clicky/tray.py`, `playback.py`, `app.py` | Tray menu, MP3 playback, wiring |
+| `clicky/kokoro_voice.py` | Kokoro-82M local voice: text → WAV in a worker thread |
+| `clicky/tray.py`, `playback.py`, `app.py` | Tray menu, WAV/MP3 playback, wiring |
 | `worker/` | Upstream Cloudflare Worker, unchanged |
 
 Network calls run on a background asyncio loop; the Qt GUI thread only draws. See `docs/design.md` for the
@@ -136,6 +146,8 @@ websockets code against a fake Worker and a fake AssemblyAI (`tests/test_end_to_
 
 ## Troubleshooting
 - **Logs:** `%LOCALAPPDATA%\Clicky\clicky.log`
+- **It speaks with the robotic Windows voice:** the Kokoro model isn't downloaded (run `scripts\download_kokoro.py`)
+  or `CLICKY_KOKORO_VOICE` isn't a Kokoro voice name. The log says which.
 - **"Couldn't reach the Clicky Worker":** check `CLICKY_WORKER_URL`, and that `npx wrangler deploy` succeeded.
 - **401 / invalid key errors:** re-run the matching `npx wrangler secret put …` and redeploy.
 - **Mic doesn't work:** Windows Settings → Privacy & security → Microphone → allow desktop apps.
@@ -145,3 +157,6 @@ websockets code against a fake Worker and a fake AssemblyAI (`tests/test_end_to_
 ## Credits
 Original Clicky and the Worker: [farzaa/clicky](https://github.com/farzaa/clicky) (MIT). The official, polished
 apps are at [heyclicky.com](https://www.heyclicky.com/). This is an independent community port.
+Local voice: [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx) (MIT) and the Kokoro-82M model (Apache-2.0).
+Its dependencies `phonemizer` and `espeakng-loader` (eSpeak NG) are GPL-3.0; they are installed from PyPI, not
+included in this repo.

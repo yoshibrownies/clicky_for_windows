@@ -60,10 +60,10 @@ def test_formula_positions_follow_time():
 
 
 def test_keyframes_interpolate_and_hold():
-    scene = scene_from(SPEC_EXAMPLE)
-    assert item(scene.frame(0.0), "rect").values["h"] == 1
+    scene = scene_with({"type": "rect", "x": 7, "y": 0, "w": 1, "h": [[0, 1], [2, 5]]})
+    assert item(scene.frame(0.5), "rect").values["h"] < 2  # eased: slower than constant speed at first
     assert item(scene.frame(1.0), "rect").values["h"] == pytest.approx(3)
-    assert item(scene.frame(5.0), "rect").values["h"] == 5
+    assert item(scene.frame(3.0), "rect").values["h"] == 5
 
 
 def test_end_hides_the_object_and_fades_it_out_first():
@@ -99,7 +99,7 @@ def test_plot_samples_between_from_and_to():
 
 def test_plot_breaks_where_the_function_is_undefined():
     scene = scene_from({"objects": [{"type": "plot", "fn": "sqrt(x)", "from": -2, "to": 2}]})
-    segments = scene.frame(0)[0].segments
+    segments = scene.frame(1.0)[0].segments
     assert all(point[0] >= -0.05 for segment in segments for point in segment)
 
 
@@ -142,7 +142,7 @@ def test_unknown_colours_fall_back_and_bad_objects_are_skipped():
         }
     )
     assert len(scene.objects) == 1
-    assert scene.frame(0)[0].color == "blue"
+    assert scene.frame(1.0)[0].color == "blue"
 
 
 def test_limits_and_clamps():
@@ -294,7 +294,7 @@ def test_opacity_scales_alpha_and_rotate_and_pivot_reach_rects():
 
 
 def test_bad_fill_and_pivot_fall_back_to_defaults():
-    (rect,) = scene_with({"type": "rect", "x": 1, "y": 0, "w": 1, "h": 1, "fill": "sparkly", "pivot": "top"}).frame(0)
+    (rect,) = scene_with({"type": "rect", "x": 1, "y": 0, "w": 1, "h": 1, "fill": "sparkly", "pivot": "top"}).frame(1.0)
     assert rect.fill == "" and rect.pivot == "bottom-left"
 
 
@@ -302,4 +302,79 @@ def test_bad_fill_and_pivot_fall_back_to_defaults():
 def test_non_string_icon_names_and_types_never_raise(bad_value):
     good = {"type": "circle", "x": 1, "y": 1}
     scene = scene_with({"type": "icon", "name": bad_value, "x": 1, "y": 1}, {"type": bad_value, "x": 1, "y": 1}, good)
-    assert scene is not None and [item.kind for item in scene.frame(0)] == ["circle"]
+    assert scene is not None and [item.kind for item in scene.frame(1.0)] == ["circle"]
+
+
+# ---------- livelier scenes: entrances, build-up, eased keyframes ----------
+
+
+def test_objects_ease_in_from_their_start():
+    from clicky.scene import ENTRANCE_SECONDS
+
+    scene = scene_with({"type": "circle", "x": 1, "y": 1, "start": 1.0}, {"type": "circle", "x": 2, "y": 2})
+    assert [item.kind for item in scene.frame(0.5)] == ["circle"]  # the first hasn't started yet
+    entering = scene.frame(1.0 + ENTRANCE_SECONDS / 2)[0]  # listed first, so drawn first
+    assert 0.0 < entering.entrance < 1.0 and 0.0 < entering.alpha < 1.0
+    assert scene.frame(1.0 + ENTRANCE_SECONDS + 0.01)[0].entrance == 1.0
+
+
+def test_unstaged_scenes_build_up_in_order():
+    from clicky.scene import STAGGER_SECONDS
+
+    scene = scene_with(
+        {"type": "circle", "x": 1, "y": 1}, {"type": "circle", "x": 2, "y": 2}, {"type": "circle", "x": 3, "y": 3}
+    )
+    assert [scene_object.start for scene_object in scene.objects] == pytest.approx(
+        [0.0, STAGGER_SECONDS, 2 * STAGGER_SECONDS]
+    )
+
+
+def test_staged_scenes_keep_their_timing():
+    scene = scene_with(
+        {"type": "circle", "x": 1, "y": 1},
+        {"type": "circle", "x": 2, "y": 2, "start": 2},
+        {"type": "circle", "x": 3, "y": 3},
+    )
+    assert [scene_object.start for scene_object in scene.objects] == [0.0, 2.0, 0.0]
+
+
+def test_stagger_fits_in_the_first_seconds():
+    scene = scene_with(*({"type": "point", "x": index % 10, "y": 1} for index in range(12)))
+    assert scene.objects[-1].start <= 1.2 + 1e-9
+
+
+def test_keyframes_ease_between_values():
+    (item_quarter,) = scene_with({"type": "point", "x": [[0, 0], [4, 8]], "y": 1, "start": 0.0}).frame(1.0)
+    (item_middle,) = scene_with({"type": "point", "x": [[0, 0], [4, 8]], "y": 1}).frame(2.0)
+    assert item_middle.values["x"] == pytest.approx(4.0)  # halfway in time, halfway in value
+    assert item_quarter.values["x"] < 2.0  # eased: slower than constant speed at the start
+
+
+def test_late_starts_are_fully_in_by_the_end():
+    import json as _json
+
+    scene = parse_scene(
+        _json.dumps({"duration": 6, "objects": [{"type": "arrow", "x": 1, "y": 1, "dx": 2, "dy": 0, "start": 5.8}]})
+    )
+    (arrow,) = scene.frame(6.0)  # the frame the card keeps as its still picture
+    assert arrow.entrance == 1.0 and arrow.alpha == 1.0
+
+
+def test_build_up_leaves_moving_and_ending_objects_alone():
+    from clicky.scene import STAGGER_SECONDS
+
+    scene = scene_with(
+        {"type": "circle", "x": 1, "y": 1},
+        {"type": "point", "x": "t*2", "y": 1},  # moving: its motion is timed from t = 0
+        {"type": "circle", "x": 2, "y": 2},
+        {"type": "circle", "x": 3, "y": 3, "end": 0.8},  # has an end: moving its start could hide it
+        {"type": "circle", "x": 4, "y": 4},
+    )
+    starts = [scene_object.start for scene_object in scene.objects]
+    assert starts == pytest.approx([0.0, 0.0, STAGGER_SECONDS, 0.0, 2 * STAGGER_SECONDS])
+
+
+def test_keyframes_keep_their_speed_through_a_straight_run():
+    (before,) = scene_with({"type": "point", "x": [[0, 0], [1, 2], [2, 4], [3, 6]], "y": 1}).frame(0.95)
+    (after,) = scene_with({"type": "point", "x": [[0, 0], [1, 2], [2, 4], [3, 6]], "y": 1}).frame(1.05)
+    assert after.values["x"] - before.values["x"] > 0.15  # no stop at the middle keyframe (linear would be 0.2)

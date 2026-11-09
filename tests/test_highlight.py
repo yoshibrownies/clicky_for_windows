@@ -31,9 +31,11 @@ def paint(painter_object: ScenePainter, t: float, highlight) -> None:
 
 def test_highlight_follows_the_object_as_it_moves(qt_app):
     scene_painter = ScenePainter()
-    paint(scene_painter, 0.0, ("ball", 1.0))  # ball due east
+    paint(scene_painter, 2 * math.pi, ("ball", 1.0))  # one full turn in (everything has eased in): due east
     east = scene_painter.highlight_rect
-    paint(scene_painter, math.pi / 2, ("Ball", 1.0))  # a quarter turn later: due north (label is case-blind)
+    paint(
+        scene_painter, 2 * math.pi + math.pi / 2, ("Ball", 1.0)
+    )  # a quarter turn later: due north (label is case-blind)
     north = scene_painter.highlight_rect
     assert east is not None and north is not None
     assert north.center().y() < east.center().y() - 50  # moved up

@@ -150,8 +150,8 @@ def test_a_rotated_rect_is_drawn_where_it_has_tipped_to(qt_app):
             }
         )
     )
-    upright_image, _ = paint_to_image(upright, 0)
-    tipped_image, _ = paint_to_image(tipped, 0)
+    upright_image, _ = paint_to_image(upright, 1.0)
+    tipped_image, _ = paint_to_image(tipped, 1.0)
 
     def red_columns(image):
         return {x for x in range(420) for y in range(0, 260, 3) if image.pixelColor(x, y).red() > 150}
@@ -181,8 +181,80 @@ def test_huge_paths_never_send_the_pen_off_into_space(qt_app):
             }
         )
     )
-    _, scene_painter = paint_to_image(huge, 0)
+    _, scene_painter = paint_to_image(huge, 1.0)
     point = scene_painter.focus_point
     assert point is not None
     assert 0 <= point.x() <= 420 and 0 <= point.y() <= 260  # kept inside the animation panel
     assert PIXEL_LIMIT == 10_000.0
+
+
+# ---------- entrances and readable text ----------
+
+
+def single_object_scene(scene_object):
+    return parse_scene(json.dumps({"duration": 4, "world": {"x": [0, 10], "y": [0, 10]}, "objects": [scene_object]}))
+
+
+def red_extent(image, axis="x"):
+    hits = [
+        (x, y)
+        for x in range(0, image.width(), 2)
+        for y in range(0, image.height(), 2)
+        if image.pixelColor(x, y).red() > 150
+        and image.pixelColor(x, y).green() < 120
+        and image.pixelColor(x, y).alpha() > 60
+    ]
+    values = [x if axis == "x" else y for x, y in hits]
+    return (max(values) - min(values)) if values else 0
+
+
+def test_entering_shapes_grow_into_place(qt_app):
+    from clicky.scene import ENTRANCE_SECONDS
+
+    scene = single_object_scene({"type": "circle", "x": 5, "y": 5, "r": 40, "color": "red", "label": "dot"})
+    _, entering = paint_to_image(scene, ENTRANCE_SECONDS * 0.3, highlight=("dot", 0.5))
+    entering_width = entering.highlight_rect.width()
+    _, settled = paint_to_image(scene, 2.0, highlight=("dot", 0.5))
+    assert entering_width < settled.highlight_rect.width() - 10
+
+
+def test_arrows_draw_along_their_length_while_entering(qt_app):
+    from clicky.scene import ENTRANCE_SECONDS
+
+    scene = single_object_scene({"type": "arrow", "x": 1, "y": 5, "dx": 8, "dy": 0, "color": "red"})
+    entering_image, _ = paint_to_image(scene, ENTRANCE_SECONDS * 0.4)
+    settled_image, _ = paint_to_image(scene, 2.0)
+    assert red_extent(entering_image) < red_extent(settled_image) * 0.8
+
+
+def test_overlapping_texts_are_nudged_apart(qt_app):
+    scene = parse_scene(
+        json.dumps(
+            {
+                "duration": 4,
+                "world": {"x": [0, 10], "y": [0, 10]},
+                "objects": [
+                    {"type": "text", "x": 3, "y": 5, "text": "output: 2 turns"},
+                    {"type": "text", "x": 4, "y": 5, "text": "input: 1 turn"},
+                ],
+            }
+        )
+    )
+    _, scene_painter = paint_to_image(scene, 3.0)
+    first, second = scene_painter.text_rects
+    assert not first.intersects(second)
+
+
+def test_a_rotating_icon_spins_in_place(qt_app):
+    from clicky.scene_painter import WorldMapper, figure_pixel_points
+
+    def centre_of(rotate):
+        scene = single_object_scene({"type": "icon", "name": "gear", "x": 5, "y": 2, "size": 3, "rotate": rotate})
+        (item,) = scene.frame(2.0)
+        mapper = WorldMapper(scene.world, (0, 0, 400, 300))
+        points = [point for outline in figure_pixel_points(item, mapper) for point in outline]
+        xs, ys = [point.x() for point in points], [point.y() for point in points]
+        return ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+
+    still, turned = centre_of(0), centre_of(90)
+    assert abs(still[0] - turned[0]) < 3 and abs(still[1] - turned[1]) < 3  # turns about its own middle

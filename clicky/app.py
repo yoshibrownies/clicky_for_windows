@@ -34,6 +34,7 @@ from clicky.services import WorkerServices
 from clicky.status_pill import StatusPill
 from clicky.system_voice import SystemVoice, VoiceOutput
 from clicky.tray import ClickyTray
+from clicky.version import read_build_info
 from clicky.visual_director import VisualDirector
 
 logger = logging.getLogger("clicky")
@@ -208,6 +209,8 @@ def main() -> int:
         model=settings.model,
         effort=settings.effort,
     )
+    build_info = read_build_info(PROJECT_ROOT)
+    version_text = build_info.describe() if build_info else "unknown"
     tray = ClickyTray(
         hotkey_text=settings.hotkey,
         models=AVAILABLE_MODELS,
@@ -216,6 +219,7 @@ def main() -> int:
         effort_levels=EFFORT_LEVELS,
         selected_effort=settings.effort,
         notepad_visible=True,
+        version_text=version_text,
     )
     annotation_layer = AnnotationLayer()
     card = LessonCard()
@@ -374,7 +378,8 @@ def main() -> int:
     overlay.show_notice(f"hi! hold {tray.pretty_hotkey} and talk to me.")
     tray.show_message("Clicky is running", f"Hold {tray.pretty_hotkey} and talk. Logs: {log_path}")
     logger.info(
-        "Clicky started (worker %s, model %s, hotkey %s)",
+        "Clicky started (version %s, worker %s, model %s, hotkey %s)",
+        version_text,
         mask_worker_url(settings.worker_base_url),
         settings.model,
         settings.hotkey,

@@ -26,6 +26,11 @@ MAX_DURATION = 30.0
 DEFAULT_DURATION = 8.0
 DEFAULT_WORLD = (0.0, 10.0, 0.0, 10.0)
 FADE_SECONDS = 0.25
+# Every object eases in when it appears (fade + grow; lines draw along their length).
+ENTRANCE_SECONDS = 0.45
+# A scene that stages nothing builds up anyway: objects appear in listed order, this far apart, within the window.
+STAGGER_SECONDS = 0.18
+STAGGER_WINDOW_SECONDS = 1.2
 CAPTION_FADE_SECONDS = 0.3
 TRAIL_SAMPLES = 30
 PLOT_SAMPLES = 60
@@ -84,6 +89,27 @@ def _is_number(value) -> bool:
         return False
 
 
+def _ease(progress: float) -> float:
+    """Smoothstep: starts and ends gently, so moves and entrances don't jerk."""
+    progress = max(0.0, min(1.0, progress))
+    return progress * progress * (3.0 - 2.0 * progress)
+
+
+def _direction(change: float) -> int:
+    return (change > 0) - (change < 0)
+
+
+def _ease_segment(progress: float, ease_in: bool, ease_out: bool) -> float:
+    progress = max(0.0, min(1.0, progress))
+    if ease_in and ease_out:
+        return _ease(progress)
+    if ease_in:
+        return progress * progress
+    if ease_out:
+        return progress * (2.0 - progress)
+    return progress
+
+
 def _number_property(raw) -> NumberValue | None:
     """Constant, formula string or [[time, value], ...] keyframes, as a function of (t, x)."""
     if _is_number(raw):
@@ -99,14 +125,20 @@ def _number_property(raw) -> NumberValue | None:
                 return None
             keyframes.append((float(entry[0]), float(entry[1])))
         keyframes.sort(key=lambda pair: pair[0])
+        # Ease only where motion starts, stops or turns back: a straight run through several keyframes keeps going.
+        directions = [_direction(b[1] - a[1]) for a, b in zip(keyframes, keyframes[1:], strict=False)]
 
         def interpolate(t: float, x: float = 0.0) -> float:
             if t <= keyframes[0][0]:
                 return keyframes[0][1]
-            for (time_a, value_a), (time_b, value_b) in zip(keyframes, keyframes[1:], strict=False):
+            for index, ((time_a, value_a), (time_b, value_b)) in enumerate(zip(keyframes, keyframes[1:], strict=False)):
                 if t <= time_b:
                     span = time_b - time_a
-                    return value_b if span <= 0 else value_a + (value_b - value_a) * (t - time_a) / span
+                    if span <= 0:
+                        return value_b
+                    ease_in = index == 0 or directions[index - 1] != directions[index]
+                    ease_out = index == len(directions) - 1 or directions[index + 1] != directions[index]
+                    return value_a + (value_b - value_a) * _ease_segment((t - time_a) / span, ease_in, ease_out)
             return keyframes[-1][1]
 
         return interpolate
@@ -164,6 +196,8 @@ class SceneObject:
     fill: Callable[[float], str] | None = None
     pivot: str = "bottom-left"
     opacity: NumberValue | None = None
+    turn_centre_y: float = 0.0  # icons spin about their middle (half their height), not their base
+    moves: bool = False  # any number is a formula or keyframes (its motion is timed from t = 0)
 
 
 @dataclass
@@ -179,6 +213,8 @@ class DrawItem:
     segments: list[list[tuple[float, float]]] = field(default_factory=list)
     fill: str = ""  # a palette colour, "none", or "" for the kind's usual look
     pivot: str = "bottom-left"
+    entrance: float = 1.0  # 0..1 while easing in
+    turn_centre_y: float = 0.0
 
 
 @dataclass
@@ -217,12 +253,14 @@ class Scene:
         return items
 
 
+def _entrance(scene_object: SceneObject, t: float) -> float:
+    return _ease((t - scene_object.start) / ENTRANCE_SECONDS)
+
+
 def _visibility(scene_object: SceneObject, t: float) -> float:
     if t < scene_object.start or (scene_object.end is not None and t > scene_object.end):
         return 0.0
-    alpha = 1.0
-    if scene_object.start > 0:
-        alpha = min(alpha, (t - scene_object.start) / FADE_SECONDS)
+    alpha = _entrance(scene_object, t)
     if scene_object.end is not None:
         alpha = min(alpha, (scene_object.end - t) / FADE_SECONDS)
     return max(0.0, min(1.0, alpha))
@@ -251,6 +289,8 @@ def _draw_object(scene_object: SceneObject, t: float) -> DrawItem | None:
         dashed=scene_object.dashed,
         fill=scene_object.fill(t) if scene_object.fill else "",
         pivot=scene_object.pivot,
+        entrance=_entrance(scene_object, t),
+        turn_centre_y=scene_object.turn_centre_y,
     )
     if scene_object.subpaths is not None:
         item.segments = partial_subpaths(scene_object.subpaths, max(0.0, min(1.0, values.get("draw", 1.0))))
@@ -315,6 +355,8 @@ def _parse_object(raw) -> SceneObject | None:
     fill = _stepped_text_property(raw["fill"], 12, FILL_CHOICES) if kind in FILLABLE_KINDS and "fill" in raw else None
     pivot = raw.get("pivot") if raw.get("pivot") in PIVOTS else "bottom-left"
     opacity = _number_property(raw["opacity"]) if "opacity" in raw else None
+    number_names = (*REQUIRED_NUMBERS[kind], *OPTIONAL_NUMBERS.get(kind, {}), "opacity")
+    moves = kind == "plot" or any(isinstance(raw.get(name), (str, list)) for name in number_names)
     plot_function = None
     if kind == "plot":
         formula = compile_formula(raw.get("fn")) if isinstance(raw.get("fn"), str) else None
@@ -338,9 +380,11 @@ def _parse_object(raw) -> SceneObject | None:
         end=end,
         plot_function=plot_function,
         subpaths=subpaths,
+        turn_centre_y=(max(y for points in subpaths for _, y in points) / 2) if kind == "icon" else 0.0,
         fill=fill,
         pivot=pivot,
         opacity=opacity,
+        moves=moves,
     )
 
 
@@ -392,6 +436,17 @@ def parse_scene(text: str) -> Scene | None:
 
     duration = float(data["duration"]) if _is_number(data.get("duration")) else DEFAULT_DURATION
     duration = max(MIN_DURATION, min(MAX_DURATION, duration))
+    # Nothing staged: build the still parts up in the order written, finishing early enough to be fully in by the
+    # end. Moving objects keep t = 0 (their motion is timed from it) and so do ones with an end (or they might vanish).
+    still_parts = [scene_object for scene_object in objects if not scene_object.moves and scene_object.end is None]
+    if len(still_parts) >= 3 and all(scene_object.start == 0.0 for scene_object in objects):
+        window = min(STAGGER_WINDOW_SECONDS, max(0.0, duration - ENTRANCE_SECONDS - 0.05))
+        step = min(STAGGER_SECONDS, window / (len(still_parts) - 1))
+        for index, scene_object in enumerate(still_parts):
+            scene_object.start = index * step
+    latest_start = max(0.0, duration - ENTRANCE_SECONDS)  # fully in by the last frame (the card's still picture)
+    for scene_object in objects:
+        scene_object.start = min(scene_object.start, latest_start)
 
     world = DEFAULT_WORLD
     raw_world = data.get("world")

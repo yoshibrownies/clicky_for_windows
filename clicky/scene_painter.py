@@ -79,6 +79,7 @@ def _color(name: str, alpha: float = 1.0) -> QColor:
 ICON_FILL_ALPHA = 0.14  # icons get a soft wash of their colour unless a fill is given
 PATH_FILL_ALPHA = 0.35
 FIGURE_PEN_WIDTH = 2.6
+TEXT_NUDGE_OFFSETS = (0.0, -16.0, 16.0, -32.0, 32.0)  # tried in order to keep text from overlapping
 
 
 def _fill_color(item: DrawItem, default_alpha: float) -> QColor | None:
@@ -97,19 +98,20 @@ def _fill_color(item: DrawItem, default_alpha: float) -> QColor | None:
 
 
 def figure_pixel_points(item: DrawItem, mapper: WorldMapper) -> list[list[QPointF]]:
-    """A path's or icon's outline in pixels: scaled uniformly (by the y axis), rotated counter-clockwise, then
-    placed at (x, y)."""
+    """A path's or icon's outline in pixels: scaled uniformly (by the y axis), rotated counter-clockwise (an icon
+    about its middle, so a turning figure spins in place; a path about its own origin), then placed at (x, y)."""
     anchor_x, anchor_y = mapper.to_pixel(item.values["x"], item.values["y"])
-    size = item.values.get("size", item.values.get("scale", 1.0))
+    size = item.values.get("size", item.values.get("scale", 1.0)) * (0.85 + 0.15 * item.entrance)  # grows in
     pixel_scale = max(-PIXEL_LIMIT, min(PIXEL_LIMIT, size * mapper.scale_y))
     angle = math.radians(item.values.get("rotate", 0.0))
     cos_a, sin_a = math.cos(angle), math.sin(angle)
+    centre_y = item.turn_centre_y
     outlines: list[list[QPointF]] = []
     for segment in item.segments:
         outline = []
         for local_x, local_y in segment:
-            rotated_x = local_x * cos_a - local_y * sin_a
-            rotated_y = local_x * sin_a + local_y * cos_a
+            rotated_x = local_x * cos_a - (local_y - centre_y) * sin_a
+            rotated_y = local_x * sin_a + (local_y - centre_y) * cos_a + centre_y
             pixel_x = max(-PIXEL_LIMIT, min(PIXEL_LIMIT, anchor_x + rotated_x * pixel_scale))
             pixel_y = max(-PIXEL_LIMIT, min(PIXEL_LIMIT, anchor_y - rotated_y * pixel_scale))
             outline.append(QPointF(pixel_x, pixel_y))
@@ -138,12 +140,16 @@ class ScenePainter:
         self._label_font = ui_font(12, QFont.Weight.Medium)
         self.focus_point: QPointF | None = None
         self.highlight_rect: QRectF | None = None
+        self.text_rects: list[QRectF] = []  # where text and labels were placed in the last frame (kept apart)
+        self._pending_text: list[tuple[QFont, QPointF, str, QColor]] = []
 
     def paint(
         self, painter: QPainter, area: QRectF, scene: Scene, t: float, highlight: tuple[str, float] | None = None
     ) -> None:
         self.focus_point = None
         self.highlight_rect = None
+        self.text_rects = []
+        self._pending_text = []
         self._paint_scene(painter, area, scene, t, highlight)
         if self.focus_point is not None:
             # The buddy follows this point: keep it inside the panel, whatever the scene's numbers were.
@@ -194,6 +200,7 @@ class ScenePainter:
                 and wanted in (item.label.casefold(), item.text.casefold())
             ):
                 target = bounds
+        self._place_text(painter, plot)
         painter.restore()
         if highlight is not None and target is not None:
             self._paint_highlight(painter, target, highlight[1], board)
@@ -299,7 +306,7 @@ class ScenePainter:
         label_anchor: QPointF | None = None
         if item.kind in ("circle", "point"):
             center = QPointF(*mapper.to_pixel(values["x"], values["y"]))
-            radius = max(1.0, min(80.0, values.get("r", 10.0)))
+            radius = max(1.0, min(80.0, values.get("r", 10.0))) * (0.7 + 0.3 * item.entrance)  # grows in
             if item.fill:
                 brush = _fill_color(item, 1.0)
                 painter.setPen(QPen(color, 2))
@@ -316,6 +323,11 @@ class ScenePainter:
             x1, y1 = mapper.to_pixel(values["x"], values["y"])
             x2, y2 = mapper.to_pixel(values["x"] + values["w"], values["y"] + values["h"])
             rect = QRectF(QPointF(min(x1, x2), min(y1, y2)), QPointF(max(x1, x2), max(y1, y2)))
+            if item.entrance < 1.0:  # grows in about its centre
+                grow = 0.7 + 0.3 * item.entrance
+                centre = rect.center()
+                rect = QRectF(0, 0, rect.width() * grow, rect.height() * grow)
+                rect.moveCenter(centre)
             fill = _fill_color(item, 0.55)
             painter.setPen(QPen(color, 2))
             painter.setBrush(fill if fill is not None else Qt.BrushStyle.NoBrush)
@@ -340,12 +352,14 @@ class ScenePainter:
         elif item.kind == "line":
             line_start = QPointF(*mapper.to_pixel(values["x1"], values["y1"]))
             line_end = QPointF(*mapper.to_pixel(values["x2"], values["y2"]))
+            line_end = line_start + (line_end - line_start) * item.entrance  # draws along its length
             painter.setPen(pen)
             painter.drawLine(line_start, line_end)
             bounds = QRectF(line_start, line_end).normalized()
         elif item.kind == "arrow":
             start = QPointF(*mapper.to_pixel(values["x"], values["y"]))
             vector_x, vector_y = mapper.vector_to_pixel(values["dx"], values["dy"])
+            vector_x, vector_y = vector_x * item.entrance, vector_y * item.entrance  # grows from its tail
             end = QPointF(start.x() + vector_x, start.y() + vector_y)
             bounds = QRectF(start, end).normalized()
             painter.setPen(pen)
@@ -364,10 +378,8 @@ class ScenePainter:
             label_anchor = QPointF((start.x() + end.x()) / 2 - label_width / 2, min(start.y(), end.y()) - 8)
         elif item.kind == "text":
             font = ui_font(int(max(9, min(40, values.get("size", 14)))), QFont.Weight.Medium)
-            painter.setFont(font)
-            painter.setPen(color)
             baseline = QPointF(*mapper.to_pixel(values["x"], values["y"]))
-            painter.drawText(baseline, item.text)
+            self._pending_text.append((font, baseline, item.text, QColor(color)))
             text_rect = QFontMetricsF(font).boundingRect(item.text)
             bounds = text_rect.translated(baseline)
         elif item.kind in ("path", "icon"):
@@ -424,7 +436,23 @@ class ScenePainter:
                     self.focus_point = QPointF(label_anchor)
 
         if item.label and label_anchor is not None:
-            painter.setFont(self._label_font)
-            painter.setPen(color)
-            painter.drawText(label_anchor, item.label)
+            self._pending_text.append((self._label_font, label_anchor, item.label, QColor(color)))
         return bounds
+
+    def _place_text(self, painter: QPainter, plot: QRectF) -> None:
+        """Draw this frame's text and labels last (on top of shapes), nudging each up or down so none overlap."""
+        for font, anchor, text, color in self._pending_text:
+            text_box = QFontMetricsF(font).boundingRect(text)
+            chosen = anchor
+            for offset in TEXT_NUDGE_OFFSETS:
+                candidate = QPointF(anchor.x(), anchor.y() + offset)
+                box = text_box.translated(candidate)
+                if not any(box.intersects(placed) for placed in self.text_rects) and plot.adjusted(
+                    -6, -6, 6, 6
+                ).contains(box.center()):
+                    chosen = candidate
+                    break
+            painter.setFont(font)
+            painter.setPen(color)
+            painter.drawText(chosen, text)
+            self.text_rects.append(text_box.translated(chosen))
